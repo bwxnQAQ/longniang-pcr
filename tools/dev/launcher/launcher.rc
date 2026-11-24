@@ -1,0 +1,29 @@
+// 龙娘pcr.exe 的图标和版本信息。改了以后重新做 rsrc_windows_amd64.syso（见 说明.md）。
+1 ICON "launcher.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "龙娘pcr"
+            VALUE "ProductName", "龙娘pcr"
+            VALUE "FileVersion", "1.0"
+            VALUE "ProductVersion", "1.0"
+            VALUE "InternalName", "longniang-pcr-launcher"
+            VALUE "OriginalFilename", "龙娘pcr.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END

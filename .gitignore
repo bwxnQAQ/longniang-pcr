@@ -1,0 +1,18 @@
+# 你自己的东西：运行记录、截图、学到的角色数据、排查包——不进仓库
+logs/
+recordings/
+排查包/
+data/learned/
+_可以删/
+
+# 运行时产生的
+__pycache__/
+*.pyc
+*.new
+*.old
+*.part
+
+# 开发用的材料（自测、开发记录、测试用的游戏截图）只留 exe 的源代码
+tools/dev/*
+!tools/dev/launcher/
+tools/dev/launcher/*.res

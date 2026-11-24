@@ -1,0 +1,10 @@
+{
+  "stop_key": "F12",
+  "drill": {"guild_mark": "guild_cile", "guild_name": "慈乐之音"},
+  "walk": {"steps": 3, "pick": "auto", "team": "role", "defeat_retries": 2, "battle_timeout": 300, "survey": true, "max_restarts": 3, "unknown_event": "first",
+           "boss": "mid", "boss_teams_mid": 1, "boss_teams_final": 3, "scout_bosses": true, "boss_avoid": [],
+           "route_values": {"normal": 640, "relic": 400, "event": 500, "mark": 600, "shop": "auto"},
+           "shop": {"buy": true, "max_rate": 5.0, "refresh_max": 600}},
+  "limits": {"max_taps": 60, "max_seconds": 600, "unknown_timeout": 20, "wait_timeout": 90},
+  "human": {}
+}

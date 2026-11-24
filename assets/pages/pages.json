@@ -1,0 +1,2769 @@
+{
+ "norm": [
+  1280,
+  720
+ ],
+ "title_thr": 0.4,
+ "titles": [
+  {
+   "id": "dlg_guild_confirm",
+   "name": "公会选择确认",
+   "keys": [
+    "title_dlg_guild_confirm_0"
+   ]
+  },
+  {
+   "id": "dlg_depart_reward",
+   "name": "出发奖励",
+   "keys": [
+    "title_dlg_depart_reward_0"
+   ]
+  },
+  {
+   "id": "dlg_pick3",
+   "name": "角色选择",
+   "keys": [
+    "title_dlg_pick3_0"
+   ]
+  },
+  {
+   "id": "dlg_move",
+   "name": "移动目标确认",
+   "keys": [
+    "title_dlg_move_0"
+   ]
+  },
+  {
+   "id": "dlg_end",
+   "name": "结束确认",
+   "keys": [
+    "title_dlg_end_0"
+   ]
+  },
+  {
+   "id": "dlg_monster",
+   "name": "魔物详情",
+   "keys": [
+    "title_dlg_monster_0"
+   ]
+  },
+  {
+   "id": "dlg_status",
+   "name": "现在的状况",
+   "keys": [
+    "title_dlg_status_0"
+   ]
+  },
+  {
+   "id": "dlg_setting",
+   "name": "设定",
+   "keys": [
+    "title_dlg_setting_0"
+   ]
+  },
+  {
+   "id": "dlg_team",
+   "name": "队伍编组",
+   "keys": [
+    "title_dlg_team_0"
+   ]
+  },
+  {
+   "id": "dlg_equip",
+   "name": "特别装备设定",
+   "keys": [
+    "title_dlg_equip_0"
+   ]
+  },
+  {
+   "id": "dlg_autoequip",
+   "name": "自动特别装备设定",
+   "keys": [
+    "title_dlg_autoequip_0"
+   ]
+  },
+  {
+   "id": "dlg_items",
+   "name": "获得道具",
+   "keys": [
+    "title_dlg_items_0"
+   ]
+  },
+  {
+   "id": "dlg_join",
+   "name": "角色加入",
+   "keys": [
+    "title_dlg_join_0"
+   ]
+  },
+  {
+   "id": "dlg_shop",
+   "name": "商店",
+   "keys": [
+    "title_dlg_shop_0"
+   ]
+  },
+  {
+   "id": "dlg_buy",
+   "name": "购买确认",
+   "keys": [
+    "title_dlg_buy_0"
+   ]
+  },
+  {
+   "id": "dlg_bought",
+   "name": "购买完毕",
+   "keys": [
+    "title_dlg_bought_0"
+   ]
+  },
+  {
+   "id": "dlg_refresh",
+   "name": "更新确认",
+   "keys": [
+    "title_dlg_refresh_0"
+   ]
+  },
+  {
+   "id": "dlg_shop_exit",
+   "name": "商店确认",
+   "keys": [
+    "title_dlg_shop_exit_0"
+   ]
+  },
+  {
+   "id": "dlg_chest_result",
+   "name": "宝箱开封结果",
+   "keys": [
+    "title_dlg_chest_result_0"
+   ]
+  },
+  {
+   "id": "dlg_daychange",
+   "name": "日期变更",
+   "keys": [
+    "title_dlg_daychange_0"
+   ]
+  }
+ ],
+ "pages": [
+  {
+   "id": "black",
+   "name": "黑屏过场",
+   "dark": false,
+   "black": true,
+   "wait": true,
+   "anchors": []
+  },
+  {
+   "id": "loading",
+   "name": "加载中",
+   "dark": true,
+   "black": false,
+   "wait": true,
+   "anchors": [
+    [
+     {
+      "key": "loading_text",
+      "rect": [
+       1030,
+       636,
+       100,
+       38
+      ],
+      "mode": "white",
+      "thr": 0.6
+     }
+    ]
+   ]
+  },
+  {
+   "id": "result",
+   "name": "RESULT",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "result_logo",
+      "rect": [
+       535,
+       54,
+       215,
+       52
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "recruit_pick",
+   "name": "角色加入奖励！",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "recruit_head",
+      "rect": [
+       480,
+       36,
+       320,
+       58
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "relic_pick",
+   "name": "获得道具的机会！",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "relic_head",
+      "rect": [
+       460,
+       36,
+       370,
+       58
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "event",
+   "name": "触发事件！",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "event_head",
+      "rect": [
+       525,
+       36,
+       230,
+       58
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "scene",
+   "name": "演出画面（可跳过）",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "scene_skip",
+      "rect": [
+       1128,
+       30,
+       82,
+       48
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "join_splash",
+   "name": "角色登场画面",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "splash_plate_l",
+      "rect": [
+       840,
+       545,
+       110,
+       95
+      ],
+      "thr": 0.8,
+      "search": 8
+     }
+    ],
+    [
+     {
+      "key": "splash_plate_r",
+      "rect": [
+       1130,
+       545,
+       110,
+       95
+      ],
+      "thr": 0.65,
+      "search": 8
+     }
+    ]
+   ]
+  },
+  {
+   "id": "win_next",
+   "name": "WIN!（下一步）",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "win_logo",
+      "rect": [
+       490,
+       36,
+       310,
+       115
+      ],
+      "mode": "yellow",
+      "thr": 0.6,
+      "search": 12
+     },
+     {
+      "key": "win_report",
+      "rect": [
+       1085,
+       38,
+       100,
+       30
+      ],
+      "thr": 0.8,
+      "search": 6
+     }
+    ],
+    [
+     {
+      "key": "win_next_btn",
+      "rect": [
+       1040,
+       634,
+       150,
+       40
+      ],
+      "thr": 0.6
+     }
+    ]
+   ]
+  },
+  {
+   "id": "win_crown",
+   "name": "WIN!（胜利演出）",
+   "dark": false,
+   "black": false,
+   "wait": true,
+   "anchors": [
+    [
+     {
+      "key": "win_crown",
+      "rect": [
+       490,
+       72,
+       300,
+       192
+      ],
+      "mode": "yellow",
+      "thr": 0.6,
+      "search": 12
+     }
+    ]
+   ]
+  },
+  {
+   "id": "win",
+   "name": "WIN!",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "win_logo",
+      "rect": [
+       490,
+       36,
+       310,
+       115
+      ],
+      "mode": "yellow",
+      "thr": 0.6,
+      "search": 12
+     }
+    ]
+   ]
+  },
+  {
+   "id": "defeat",
+   "name": "战斗失败",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "defeat_retry",
+      "rect": [
+       1020,
+       642,
+       120,
+       32
+      ],
+      "thr": 0.6,
+      "search": 26
+     }
+    ],
+    [
+     {
+      "key": "defeat_end",
+      "rect": [
+       735,
+       642,
+       70,
+       32
+      ],
+      "thr": 0.6,
+      "search": 26
+     }
+    ]
+   ]
+  },
+  {
+   "id": "battle_ready",
+   "name": "战斗准备",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "ready_fight",
+      "rect": [
+       1050,
+       592,
+       80,
+       40
+      ]
+     }
+    ],
+    [
+     {
+      "key": "ready_map",
+      "rect": [
+       740,
+       592,
+       115,
+       40
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "battle",
+   "name": "战斗中",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "battle_btn_a",
+      "rect": [
+       18,
+       606,
+       84,
+       88
+      ],
+      "thr": 0.75
+     },
+     {
+      "key": "battle_btn_b",
+      "rect": [
+       18,
+       606,
+       84,
+       88
+      ],
+      "thr": 0.75
+     }
+    ]
+   ]
+  },
+  {
+   "id": "map",
+   "name": "地图",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "map_retreat",
+      "rect": [
+       865,
+       626,
+       100,
+       48
+      ]
+     }
+    ],
+    [
+     {
+      "key": "map_return",
+      "rect": [
+       1095,
+       626,
+       100,
+       48
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "lab_home",
+   "name": "迷宫首页",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "lab_go",
+      "rect": [
+       745,
+       384,
+       80,
+       42
+      ]
+     }
+    ],
+    [
+     {
+      "key": "lab_alpha",
+      "rect": [
+       1025,
+       228,
+       145,
+       38
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "guild_select",
+   "name": "公会选择",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "guild_banner",
+      "rect": [
+       520,
+       100,
+       270,
+       32
+      ]
+     }
+    ],
+    [
+     {
+      "key": "guild_skip",
+      "rect": [
+       1185,
+       32,
+       66,
+       68
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "adventure",
+   "name": "冒险",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "adv_lab",
+      "rect": [
+       1095,
+       562,
+       125,
+       34
+      ]
+     }
+    ]
+   ]
+  },
+  {
+   "id": "home",
+   "name": "主页",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "home_tab",
+      "rect": [
+       30,
+       684,
+       125,
+       32
+      ],
+      "thr": 0.55
+     }
+    ],
+    [
+     {
+      "key": "home_menu",
+      "rect": [
+       1140,
+       688,
+       78,
+       30
+      ]
+     }
+    ]
+   ]
+  }
+ ],
+ "busy": {
+  "key": "busy_connect",
+  "rect": [
+   1003,
+   34,
+   240,
+   32
+  ],
+  "mode": "white",
+  "thr": 0.6
+ },
+ "marks": [
+  {
+   "key": "guild_cile",
+   "name": "慈乐之音",
+   "rect": [
+    1030,
+    452,
+    122,
+    34
+   ],
+   "region": [
+    0,
+    440,
+    1280,
+    64
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "end_refund",
+   "name": "将返还迷宫通行证",
+   "rect": [
+    530,
+    418,
+    215,
+    30
+   ],
+   "region": [
+    500,
+    400,
+    280,
+    70
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "end3_refund",
+   "name": "但会返还相应的迷宫通行证",
+   "rect": [
+    497,
+    361,
+    274,
+    24
+   ],
+   "region": [
+    460,
+    345,
+    350,
+    56
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "end3_retreat",
+   "name": "撤退（无报酬）按钮",
+   "rect": [
+    590,
+    471,
+    100,
+    50
+   ],
+   "region": [
+    545,
+    455,
+    190,
+    82
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "map_boss1",
+   "name": "进度条上的区域 3 首领图标",
+   "rect": [
+    653,
+    25,
+    40,
+    40
+   ],
+   "region": [
+    633,
+    10,
+    80,
+    70
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "map_boss2",
+   "name": "进度条上的最终首领图标",
+   "rect": [
+    807,
+    25,
+    40,
+    40
+   ],
+   "region": [
+    787,
+    10,
+    80,
+    70
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "mon_hen",
+   "name": "厄勒克特拉夫人",
+   "rect": [
+    392,
+    102,
+    154,
+    24
+   ],
+   "region": [
+    384,
+    94,
+    190,
+    40
+   ],
+   "thr": 0.85
+  },
+  {
+   "key": "mon_goblin",
+   "name": "领主哥布林",
+   "rect": [
+    392,
+    102,
+    130,
+    24
+   ],
+   "region": [
+    384,
+    94,
+    190,
+    40
+   ],
+   "thr": 0.85
+  },
+  {
+   "key": "move_normal",
+   "name": "战斗格子（普通）",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "move_extreme",
+   "name": "战斗格子（极难）",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "move_mark",
+   "name": "连结印记格子",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "move_relic",
+   "name": "迷宫遗物格子",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "move_event",
+   "name": "事件格子",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "move_shop",
+   "name": "商店格子",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "move_boss",
+   "name": "首领战格子",
+   "rect": [
+    480,
+    376,
+    320,
+    28
+   ],
+   "region": [
+    470,
+    368,
+    340,
+    44
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_arena",
+   "name": "斗技场",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_lost",
+   "name": "迷路",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_box",
+   "name": "箱子",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_tablet",
+   "name": "石板",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_guild_office",
+   "name": "公会管理协会",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_venue",
+   "name": "活动会场出现了魔物（纯）",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_picnic",
+   "name": "郊游做料理",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_picnic2",
+   "name": "郊游做料理（做好了）",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "role_tank",
+   "name": "想要坦克型",
+   "rect": [
+    392,
+    203,
+    126,
+    30
+   ],
+   "region": [
+    380,
+    190,
+    530,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "role_heal",
+   "name": "想要治疗型",
+   "rect": [
+    762,
+    203,
+    126,
+    30
+   ],
+   "region": [
+    380,
+    190,
+    530,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "role_debuff",
+   "name": "想要减益型",
+   "rect": [
+    392,
+    203,
+    126,
+    30
+   ],
+   "region": [
+    380,
+    190,
+    530,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "role_jam",
+   "name": "想要干扰型",
+   "rect": [
+    762,
+    203,
+    126,
+    30
+   ],
+   "region": [
+    380,
+    190,
+    530,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "role_support",
+   "name": "想要强化型",
+   "rect": [
+    392,
+    203,
+    126,
+    30
+   ],
+   "region": [
+    380,
+    190,
+    530,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "role_buff",
+   "name": "想要增益型",
+   "rect": [
+    762,
+    203,
+    126,
+    30
+   ],
+   "region": [
+    380,
+    190,
+    530,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "area_1",
+   "name": "区域 1",
+   "rect": [
+    430,
+    42,
+    26,
+    30
+   ],
+   "region": [
+    424,
+    36,
+    38,
+    42
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "area_2",
+   "name": "区域 2",
+   "rect": [
+    430,
+    42,
+    26,
+    30
+   ],
+   "region": [
+    424,
+    36,
+    38,
+    42
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "area_3",
+   "name": "区域 3",
+   "rect": [
+    430,
+    42,
+    26,
+    30
+   ],
+   "region": [
+    424,
+    36,
+    38,
+    42
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "area_4",
+   "name": "区域 4",
+   "rect": [
+    430,
+    42,
+    26,
+    30
+   ],
+   "region": [
+    424,
+    36,
+    38,
+    42
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "area_5",
+   "name": "区域 5",
+   "rect": [
+    430,
+    42,
+    26,
+    30
+   ],
+   "region": [
+    424,
+    36,
+    38,
+    42
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "btn_choose",
+   "name": "选择",
+   "rect": [
+    425,
+    576,
+    62,
+    34
+   ],
+   "region": [
+    150,
+    536,
+    990,
+    130
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "pick_0",
+   "name": "0/3",
+   "rect": [
+    1198,
+    96,
+    44,
+    22
+   ],
+   "region": [
+    1190,
+    90,
+    60,
+    34
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "pick_1",
+   "name": "1/3",
+   "rect": [
+    1198,
+    96,
+    44,
+    22
+   ],
+   "region": [
+    1190,
+    90,
+    60,
+    34
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "pick_2",
+   "name": "2/3",
+   "rect": [
+    1198,
+    96,
+    44,
+    22
+   ],
+   "region": [
+    1190,
+    90,
+    60,
+    34
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "pick_3",
+   "name": "3/3",
+   "rect": [
+    1198,
+    96,
+    44,
+    22
+   ],
+   "region": [
+    1190,
+    90,
+    60,
+    34
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "team_lv",
+   "name": "等级",
+   "rect": [
+    86,
+    167,
+    35,
+    18
+   ],
+   "region": [
+    60,
+    150,
+    1180,
+    290
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "team_tag",
+   "name": "队伍N 标记",
+   "rect": [
+    264,
+    372,
+    36,
+    22
+   ],
+   "mode": "white",
+   "region": [
+    60,
+    215,
+    1180,
+    290
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "result_next",
+   "name": "下一步",
+   "rect": [
+    600,
+    645,
+    80,
+    36
+   ],
+   "region": [
+    585,
+    632,
+    110,
+    62
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "result_close",
+   "name": "关闭",
+   "rect": [
+    600,
+    645,
+    80,
+    36
+   ],
+   "region": [
+    585,
+    632,
+    110,
+    62
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "chest_ok",
+   "name": "确认",
+   "rect": [
+    600,
+    622,
+    80,
+    36
+   ],
+   "region": [
+    585,
+    608,
+    110,
+    62
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "team_check",
+   "name": "已选中",
+   "rect": [
+    166,
+    178,
+    58,
+    44
+   ],
+   "mode": "yellow",
+   "region": [
+    60,
+    150,
+    1180,
+    300
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "tile_rim",
+   "name": "格子平台",
+   "rect": [
+    583,
+    430,
+    114,
+    24
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.5
+  },
+  {
+   "key": "tile_lbl_normal",
+   "name": "普通",
+   "rect": [
+    610,
+    403,
+    60,
+    27
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "tile_lbl_extreme",
+   "name": "极难",
+   "rect": [
+    610,
+    227,
+    60,
+    27
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "tile_lbl_boss",
+   "name": "首领",
+   "rect": [
+    618,
+    403,
+    70,
+    28
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "tile_ico_mark",
+   "name": "图标·连结印记",
+   "rect": [
+    604,
+    122,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_icod_mark",
+   "name": "图标·连结印记（暗）",
+   "rect": [
+    954,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_ico_relic",
+   "name": "图标·迷宫遗物",
+   "rect": [
+    604,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_icod_relic",
+   "name": "图标·迷宫遗物（暗）",
+   "rect": [
+    954,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_ico_event",
+   "name": "图标·事件",
+   "rect": [
+    604,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_icod_event",
+   "name": "图标·事件（暗）",
+   "rect": [
+    954,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_ico_shop",
+   "name": "图标·商店",
+   "rect": [
+    604,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "tile_icod_shop",
+   "name": "图标·商店（暗）",
+   "rect": [
+    954,
+    298,
+    72,
+    56
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_attack",
+   "name": "职能·攻击",
+   "rect": [
+    158,
+    410,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_jam",
+   "name": "职能·干扰",
+   "rect": [
+    158,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_buff",
+   "name": "职能·增益",
+   "rect": [
+    581,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_break",
+   "name": "职能·破防",
+   "rect": [
+    158,
+    361,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_debuff",
+   "name": "职能·减益",
+   "rect": [
+    299,
+    410,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_support",
+   "name": "职能·强化",
+   "rect": [
+    440,
+    430,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_tank",
+   "name": "职能·坦克",
+   "rect": [
+    299,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_role_heal",
+   "name": "职能·治疗",
+   "rect": [
+    722,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_attr_fire",
+   "name": "属性·火",
+   "rect": [
+    184,
+    410,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_attr_water",
+   "name": "属性·水",
+   "rect": [
+    466,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_attr_dark",
+   "name": "属性·暗",
+   "rect": [
+    325,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_attr_wind",
+   "name": "属性·风",
+   "rect": [
+    184,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_attr_light",
+   "name": "属性·光",
+   "rect": [
+    607,
+    289,
+    24,
+    24
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "lineup_hen",
+   "name": "厄勒克特拉夫人",
+   "rect": [
+    790,
+    290,
+    110,
+    90
+   ],
+   "region": [
+    760,
+    260,
+    170,
+    150
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "lineup_golem",
+   "name": "巨型魔像",
+   "rect": [
+    800,
+    220,
+    110,
+    90
+   ],
+   "region": [
+    770,
+    190,
+    170,
+    150
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "lineup_salamander",
+   "name": "毒液沙罗曼蛇",
+   "rect": [
+    795,
+    262,
+    110,
+    90
+   ],
+   "region": [
+    765,
+    232,
+    170,
+    150
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "lineup_attack",
+   "name": "攻击装置",
+   "rect": [
+    990,
+    250,
+    100,
+    110
+   ],
+   "region": [
+    960,
+    220,
+    160,
+    170
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "lineup_curse",
+   "name": "诅咒装置",
+   "rect": [
+    790,
+    245,
+    100,
+    110
+   ],
+   "region": [
+    760,
+    215,
+    160,
+    170
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "lineup_shield",
+   "name": "护盾装置",
+   "rect": [
+    365,
+    235,
+    115,
+    110
+   ],
+   "region": [
+    335,
+    205,
+    175,
+    170
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "lineup_frosthound",
+   "name": "冰霜魔狼",
+   "rect": [
+    520,
+    285,
+    110,
+    90
+   ],
+   "region": [
+    490,
+    255,
+    170,
+    150
+   ],
+   "thr": 0.88
+  },
+  {
+   "key": "btn_defeat_retry",
+   "name": "重新挑战",
+   "rect": [
+    1020,
+    642,
+    120,
+    32
+   ],
+   "region": [
+    940,
+    620,
+    280,
+    90
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "btn_defeat_end",
+   "name": "结束",
+   "rect": [
+    735,
+    642,
+    70,
+    32
+   ],
+   "region": [
+    640,
+    620,
+    260,
+    90
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "eff_tank",
+   "name": "有效效果：坦克型",
+   "rect": [
+    780,
+    100,
+    62,
+    24
+   ],
+   "region": [
+    725,
+    85,
+    505,
+    95
+   ],
+   "thr": 0.75
+  },
+  {
+   "key": "enemy_haopengyou",
+   "name": "好朋友X",
+   "rect": [
+    366,
+    385,
+    84,
+    25
+   ],
+   "mode": "white",
+   "region": [
+    356,
+    378,
+    130,
+    40
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "enemy_youling",
+   "name": "幽灵领主",
+   "rect": [
+    364,
+    385,
+    88,
+    25
+   ],
+   "mode": "white",
+   "region": [
+    356,
+    378,
+    130,
+    40
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "enemy_daojing",
+   "name": "岛鲸",
+   "rect": [
+    364,
+    385,
+    62,
+    25
+   ],
+   "mode": "white",
+   "region": [
+    356,
+    378,
+    100,
+    40
+   ],
+   "thr": 0.85
+  },
+  {
+   "key": "enemy_gebulin",
+   "name": "领主哥布林",
+   "rect": [
+    364,
+    385,
+    114,
+    25
+   ],
+   "mode": "white",
+   "region": [
+    356,
+    378,
+    150,
+    40
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ico_series_power",
+   "name": "遗物系列·强化",
+   "rect": [
+    192,
+    329,
+    44,
+    44
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_series_weaken",
+   "name": "遗物系列·削弱",
+   "rect": [
+    562,
+    329,
+    44,
+    44
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_series_guard",
+   "name": "遗物系列·守备",
+   "rect": [
+    932,
+    329,
+    44,
+    44
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_series_speed",
+   "name": "遗物系列·加速",
+   "rect": [
+    192,
+    329,
+    44,
+    44
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "ico_series_crit",
+   "name": "遗物系列·暴击",
+   "rect": [
+    562,
+    329,
+    44,
+    44
+   ],
+   "mode": "color",
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.6
+  },
+  {
+   "key": "shop_coin",
+   "name": "商店：价格前的金币图标",
+   "rect": [
+    68,
+    330,
+    38,
+    33
+   ],
+   "region": [
+    60,
+    130,
+    60,
+    460
+   ],
+   "thr": 0.85
+  },
+  {
+   "key": "buy_alpha",
+   "name": "购买确认：持有阿尔法金币",
+   "rect": [
+    385,
+    496,
+    140,
+    24
+   ],
+   "region": [
+    340,
+    478,
+    230,
+    60
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "refresh_alpha",
+   "name": "更新确认：所需阿尔法金币",
+   "rect": [
+    390,
+    366,
+    126,
+    25
+   ],
+   "region": [
+    340,
+    350,
+    230,
+    56
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "dig_p_0",
+   "name": "数字 0（商品价格）",
+   "rect": [
+    209,
+    337,
+    15,
+    20
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_1",
+   "name": "数字 1（商品价格）",
+   "rect": [
+    167,
+    337,
+    9,
+    20
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_2",
+   "name": "数字 2（商品价格）",
+   "rect": [
+    550,
+    336,
+    16,
+    21
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_3",
+   "name": "数字 3（商品价格）",
+   "rect": [
+    181,
+    336,
+    15,
+    21
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_4",
+   "name": "数字 4（商品价格）",
+   "rect": [
+    565,
+    336,
+    16,
+    21
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_5",
+   "name": "数字 5（商品价格）",
+   "rect": [
+    196,
+    337,
+    14,
+    20
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_6",
+   "name": "数字 6（商品价格，倒过来的 9）",
+   "rect": [
+    181,
+    336,
+    16,
+    21
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_7",
+   "name": "数字 7（商品价格）",
+   "rect": [
+    547,
+    337,
+    14,
+    20
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_8",
+   "name": "数字 8（商品价格）",
+   "rect": [
+    181,
+    337,
+    15,
+    20
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_p_9",
+   "name": "数字 9（商品价格）",
+   "rect": [
+    181,
+    336,
+    16,
+    21
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_0",
+   "name": "数字 0（左下角计数）",
+   "rect": [
+    182,
+    657,
+    12,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_1",
+   "name": "数字 1（左下角计数）",
+   "rect": [
+    83,
+    658,
+    7,
+    16
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_2",
+   "name": "数字 2（左下角计数）",
+   "rect": [
+    78,
+    657,
+    13,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_3",
+   "name": "数字 3（左下角计数）",
+   "rect": [
+    78,
+    657,
+    13,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_4",
+   "name": "数字 4（左下角计数）",
+   "rect": [
+    89,
+    657,
+    12,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_5",
+   "name": "数字 5（左下角计数）",
+   "rect": [
+    89,
+    657,
+    12,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_6",
+   "name": "数字 6（左下角计数）",
+   "rect": [
+    182,
+    657,
+    12,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_7",
+   "name": "数字 7（左下角计数）",
+   "rect": [
+    185,
+    657,
+    10,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_8",
+   "name": "数字 8（左下角计数）",
+   "rect": [
+    182,
+    657,
+    13,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_s_9",
+   "name": "数字 9（左下角计数）",
+   "rect": [
+    89,
+    657,
+    13,
+    17
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_0",
+   "name": "数字 0（顶栏）",
+   "rect": [
+    1145,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_1",
+   "name": "数字 1（顶栏）",
+   "rect": [
+    938,
+    23,
+    8,
+    18
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_2",
+   "name": "数字 2（顶栏）",
+   "rect": [
+    938,
+    23,
+    13,
+    18
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_3",
+   "name": "数字 3（顶栏）",
+   "rect": [
+    1121,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_4",
+   "name": "数字 4（顶栏）",
+   "rect": [
+    1106,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_5",
+   "name": "数字 5（顶栏）",
+   "rect": [
+    1122,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_6",
+   "name": "数字 6（顶栏）",
+   "rect": [
+    1132,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_7",
+   "name": "数字 7（顶栏）",
+   "rect": [
+    1110,
+    24,
+    13,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_8",
+   "name": "数字 8（顶栏）",
+   "rect": [
+    1133,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  },
+  {
+   "key": "dig_t_9",
+   "name": "数字 9（顶栏）",
+   "rect": [
+    1104,
+    24,
+    14,
+    19
+   ],
+   "region": [
+    0,
+    0,
+    1280,
+    720
+   ],
+   "thr": 0.7
+  }
+ ],
+ "regions": {
+  "pass_count": [
+   840,
+   434,
+   80,
+   30
+  ]
+ }
+}

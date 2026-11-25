@@ -59,57 +59,97 @@ def _env_root() -> list[str]:
     return [v] if v else []
 
 
+# 命令行工具和配置文件都问不出端口时试的：MuMu 12 第一个实例是 16384，每多开一个加 32；7555 是老版本；5555 是安卓里面默认的
+DEFAULT_PORTS = [16384 + 32 * i for i in range(8)] + [7555, 5555]
+_REFUSED = re.compile(r"cannot connect|failed to connect|unable to connect|refused|10061|拒绝", re.I)
+
+
+def _probe(ins: mumu.MuMuInstall) -> dict[str, Any]:
+    """问一个 MuMu 安装的命令行工具：有哪些实例、哪些在运行。问不出来 infos 就是空的。"""
+    infos: dict[int, dict[str, Any]] = {}
+    cli = None
+    raw = []
+    for c in ins.cli:
+        infos, text = mumu.instance_infos(c)
+        raw.append({"cli": str(c), "output": text[:4000]})
+        if infos:
+            cli = c
+            break
+    running = {i: v for i, v in infos.items() if mumu.truthy(v.get("is_android_started")) or mumu.truthy(v.get("is_process_started"))}
+    return {"ins": ins, "cli": cli, "infos": infos, "running": running, "raw": raw}
+
+
+def _port_index(port: int) -> int:
+    """按端口猜是第几个实例（16384 起每个加 32）；别的端口当成第一个。"""
+    return (port - 16384) // 32 if port >= 16384 and (port - 16384) % 32 == 0 and port < 16384 + 32 * 64 else 0
+
+
 def find_target(rep: Any, extra_roots: list[str] | None = None) -> Target:
-    """定位 MuMu → 选实例 → 连 ADB → 读安卓信息。rep 是 Report（负责往屏幕和文件里写）。"""
+    """定位 MuMu → 选实例 → 连 ADB → 读安卓信息。rep 是 Report（负责往屏幕和文件里写）。
+
+    2026-11-25 有用户连不上（电脑上找到两个 MuMu 安装，用了第一个，它的命令行工具问不出端口，默认的 16384 / 5555 又都被拒绝）。改成：
+    · 不止一个安装：每个都问一遍，用报得出“有实例在运行”的那个，而不是排在第一个的；
+    · 命令行工具问不出端口：先看 MuMu 自己配置文件里登记的端口，再试常用的那一串（多开的实例也在里面）；
+    · 还是连不上：把试过哪些、各是什么结果说清楚。"""
     installs, clues = mumu.find_installs((extra_roots or []) + _env_root())
     rep.put("mumu_clues", clues)
     rep.put("mumu_installs", [i.to_dict() for i in installs])
     if not installs:
         names = ", ".join(sorted({p["name"] for p in clues.get("processes", []) if p.get("name")})) or "无"
         raise DiscoverError(f"没找到 MuMu 的安装目录（正在运行的相关进程：{names}）")
-    ins = installs[0]
+    usable = [i for i in installs if i.adb]
+    if not usable:
+        raise DiscoverError(f"在 {installs[0].root} 里没找到 adb.exe")
+    if len(installs) > 1:
+        rep.warn("找到不止一个 MuMu 安装：" + "；".join(str(i.root) for i in installs) + "。挨个问一遍，用正在运行的那个")
+    probes: list[dict[str, Any]] = []
+    for i in usable:                                          # 排在前面的是有进程在运行的那个安装：它答得出“在运行”就不用再问别的了
+        probes.append(_probe(i))
+        if probes[-1]["running"]:
+            break
+    rep.put("mumu_info_raw", [x for p in probes for x in p["raw"]])
+    pick = probes[-1] if probes[-1]["running"] else None
+    if pick is None and all(p["infos"] for p in probes):      # 每个安装的命令行工具都答得上话，都说没有实例在运行
+        for p in probes:
+            for i, v in sorted(p["infos"].items()):
+                rep.info(f"实例 {i}：{v.get('name', '')}　未启动　ADB {v.get('adb_host_ip', '-')}:{v.get('adb_port', '-')}")
+        raise DiscoverError("模拟器没有在运行。请先打开 MuMu、启动公主连结，再来跑一次")
+    if pick is None:                                          # 没有哪个说得出“在运行”：用问不出东西的那个，按端口去试
+        pick = next((p for p in probes if not p["infos"]), probes[0])
+    ins, cli, infos, running = pick["ins"], pick["cli"], pick["infos"], pick["running"]
     rep.ok(f"MuMu 安装目录：{ins.root}（线索：{'、'.join(dict.fromkeys(ins.sources))}）")
     if ins.version:
         rep.info(f"注册表里登记的版本：{ins.version}")
-    if len(installs) > 1:
-        rep.warn("找到不止一个 MuMu 安装：" + "；".join(str(i.root) for i in installs) + "。先用第一个")
     if ins.vms:
         rep.info("实例数据文件夹：" + "、".join(ins.vms))
-    if not ins.adb:
-        raise DiscoverError(f"在 {ins.root} 里没找到 adb.exe")
     rep.info(f"adb：{ins.adb[0]}")
     if not ins.cli:
         rep.warn("没找到命令行工具（mumu-cli.exe / MuMuManager.exe），实例信息只能靠猜")
-    else:
-        rep.info(f"命令行工具：{ins.cli[0]}")
+    elif cli is not None:
+        rep.info(f"命令行工具：{cli}")
     rep.info("截图接口 DLL：" + ("、".join(str(d.relative_to(ins.root)) for d in ins.dlls) if ins.dlls else "没找到"))
-
-    # ---- 实例 ----
-    infos: dict[int, dict[str, Any]] = {}
-    cli = None
-    raw_texts = []
-    for c in ins.cli:
-        infos, text = mumu.instance_infos(c)
-        raw_texts.append({"cli": str(c), "output": text[:4000]})
-        if infos:
-            cli = c
-            break
-    rep.put("mumu_info_raw", raw_texts)
     rep.put("mumu_infos", infos)
-    running = {i: v for i, v in infos.items() if mumu.truthy(v.get("is_android_started")) or mumu.truthy(v.get("is_process_started"))}
     for i, v in sorted(infos.items()):
         state = "运行中" if i in running else "未启动"
         rep.info(f"实例 {i}：{v.get('name', '')}　{state}　ADB {v.get('adb_host_ip', '-')}:{v.get('adb_port', '-')}")
-    if infos and not running:
-        raise DiscoverError("模拟器没有在运行。请先打开 MuMu、启动公主连结，再来跑一次")
 
+    # ---- 该连哪个端口 ----
     candidates: list[tuple[int, str]] = []
     for i, v in sorted(running.items()):
         if v.get("adb_port"):
             candidates.append((i, f"{v.get('adb_host_ip') or '127.0.0.1'}:{v['adb_port']}"))
-    if not candidates:
-        candidates = [(0, "127.0.0.1:16384"), (0, "127.0.0.1:5555")]
-        rep.warn("没从命令行工具拿到 ADB 端口，改试默认端口 16384 / 5555")
+    guessed = not candidates
+    if guessed:
+        ports: dict[int, int] = {}
+        for p in [pick] + [q for q in probes if q is not pick]:
+            for i, port in mumu.config_ports(p["ins"].root).items():
+                ports.setdefault(i, port)
+        rep.put("mumu_config_ports", ports)
+        candidates = [(i, f"127.0.0.1:{port}") for i, port in sorted(ports.items())]
+        have = {sr for _i, sr in candidates}
+        candidates += [(_port_index(port), f"127.0.0.1:{port}") for port in DEFAULT_PORTS if f"127.0.0.1:{port}" not in have]
+        rep.warn("没从命令行工具拿到 ADB 端口，" + (f"先按 MuMu 配置文件里登记的端口试（{'、'.join(str(v) for _k, v in sorted(ports.items()))}），再" if ports else "改")
+                 + "试 MuMu 常用的端口（16384 起、每多开一个加 32，还有 7555 / 5555）")
 
     # ---- ADB ----
     adb = Adb(ins.adb[0])
@@ -119,15 +159,21 @@ def find_target(rep: Any, extra_roots: list[str] | None = None) -> Target:
     for idx, serial in candidates:
         adb_i = Adb(ins.adb[0], serial)
         msg = adb_i.connect()
+        refused = bool(_REFUSED.search(msg or ""))
         st = ""
-        for _ in range(4):  # 刚连上时偶尔会先显示 offline，等一下再看
-            st = adb_i.state()
-            if st.strip() == "device":
-                break
-            time.sleep(1.0)
-        tried.append({"index": idx, "serial": serial, "connect": msg, "state": st})
+        if not refused:
+            for n in range(4):  # 刚连上时偶尔会先显示 offline，等一下再看
+                st = adb_i.state()
+                if st.strip() == "device":
+                    break
+                if n == 1 and "offline" in st:           # 一直是 offline：断开重连一次（只动这一个地址，不碰别的设备）
+                    adb_i.text(["disconnect", serial], 10.0, use_serial=False)
+                    msg = adb_i.connect()
+                time.sleep(1.0)
+        tried.append({"index": idx, "serial": serial, "connect": msg, "state": st, "refused": refused})
         if st.strip() != "device":
-            rep.warn(f"ADB 连接 {serial}：{msg or '无输出'}（状态 {st or '未知'}）")
+            if not (guessed and refused):                # 挨个试端口时，“没人在听”的那些最后合起来说一句，不一条条刷屏
+                rep.warn(f"ADB 连接 {serial}：{msg or '无输出'}（状态 {st or '未知'}）")
             continue
         rep.ok(f"ADB 已连上 {serial}")
         t = Target(install=ins, cli=cli, adb=adb_i, index=idx, serial=serial, info=infos.get(idx, {}), all_infos=infos)
@@ -139,7 +185,16 @@ def find_target(rep: Any, extra_roots: list[str] | None = None) -> Target:
     rep.put("adb_tried", tried)
     rep.put("adb_devices", adb.devices())
     if chosen is None:
-        raise DiscoverError("ADB 连不上模拟器。请在 MuMu 的设置里确认“ADB 调试”是开着的")
+        dead = [x["serial"].rsplit(":", 1)[-1] for x in tried if x["refused"]]
+        odd = [f"{x['serial'].rsplit(':', 1)[-1]}（{(x['state'] or x['connect'] or '没有回应').strip().splitlines()[0][:40]}）" for x in tried if not x["refused"]]
+        what = "；".join(x for x in (("端口 " + "、".join(dead) + " 没有东西在听" if dead else ""), ("、".join(odd) if odd else "")) if x)
+        no_proc = not clues.get("processes")
+        raise DiscoverError(
+            f"ADB 连不上模拟器（{what}）。"
+            + ("没看到 MuMu 的进程——模拟器是不是没开？" if no_proc else "")
+            + "常见原因：① MuMu 没开着，或者刚打开、安卓还没启动完；② 在 MuMu 设置里改了“ADB 调试”以后没有重启模拟器；"
+              "③ 别的模拟器、手机助手自带的 adb 在抢，把它们关掉再试"
+            + ("；④ 电脑上有不止一个 MuMu（" + "；".join(str(i.root) for i in installs) + "），这次用的是 " + str(ins.root) if len(installs) > 1 else ""))
     return chosen
 
 

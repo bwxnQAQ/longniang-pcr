@@ -342,6 +342,59 @@ def instance_infos(cli: Path) -> tuple[dict[int, dict[str, Any]], str]:
     return infos, text
 
 
+def _adb_port_in(obj: Any, depth: int = 0) -> int | None:
+    """在一份配置里找“adb”那一项的端口（层数、名字各版本不太一样，所以一层层找）。"""
+    if depth > 8:
+        return None
+    if isinstance(obj, dict):
+        adb = obj.get("adb")
+        if isinstance(adb, dict):
+            for k in ("host_port", "port"):
+                try:
+                    port = int(str(adb.get(k, "")).strip())
+                except ValueError:
+                    continue
+                if 1024 < port < 65536:
+                    return port
+        for v in obj.values():
+            got = _adb_port_in(v, depth + 1)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for v in obj:
+            got = _adb_port_in(v, depth + 1)
+            if got:
+                return got
+    return None
+
+
+def config_ports(root: Path) -> dict[int, int]:
+    """每个实例在 MuMu 自己的配置文件里登记的 ADB 端口：{实例序号: 端口}。
+
+    命令行工具问不出端口的时候用（2026-11-25 有用户的电脑上就是这样）：看 `vms/<实例文件夹>/configs/vm_config.json`
+    里“adb”那一项的 host_port，实例序号是文件夹名最后的数字。读不到、看不懂就是空的——只读，不改任何东西。"""
+    out: dict[int, int] = {}
+    try:
+        vdir = Path(root) / "vms"
+        dirs = sorted(c for c in vdir.iterdir() if c.is_dir()) if vdir.is_dir() else []
+    except OSError:
+        return out
+    for d in dirs:
+        m = re.search(r"-(\d+)$", d.name)
+        if not m:
+            continue
+        for name in ("vm_config.json", "customer_config.json"):
+            try:
+                obj = json.loads((d / "configs" / name).read_text(encoding="utf-8", errors="replace"))
+            except (OSError, ValueError):
+                continue
+            port = _adb_port_in(obj)
+            if port:
+                out[int(m.group(1))] = port
+                break
+    return out
+
+
 def instance_settings(cli: Path, index: int) -> tuple[dict[str, Any] | None, str]:
     obj, text = cli_json(cli, ["setting", "-v", str(index), "-a"])
     return (obj if isinstance(obj, dict) else None), text

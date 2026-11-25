@@ -144,6 +144,13 @@
    "keys": [
     "title_dlg_daychange_0"
    ]
+  },
+  {
+   "id": "dlg_relic_effect",
+   "name": "迷宫遗物效果",
+   "keys": [
+    "title_dlg_relic_effect_0"
+   ]
   }
  ],
  "pages": [

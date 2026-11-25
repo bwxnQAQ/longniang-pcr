@@ -249,6 +249,9 @@ class Walk:
         self.guild_turns = 0                         # 拖到头掉过几次头（两头都到过还没有 = 找遍了）
         self.guild_view: dict[str, float] | None = None      # 上一次拖之前这一屏读到的公会名字和位置（拖完一样 = 到头了）；None = 上一步不是拖
         self.guild_blank = 0                         # 连着几次一个公会的名字都没读出来
+        self.effect_said = 0.0                       # 上一次记「迷宫遗物效果」是什么时候（同一个对话框不重复记）
+        self.hands_seen = 0                          # 已经知道的“你动过模拟器、我让过手”的次数（多了就把记着的进度清掉，见 _sync_hands）
+        self.team_empty = 0                          # 连着几次“队伍里没人、名单里也挑不出人”
         # 凹度档位（方案 2026-11-19 定，2026-11-24 做）：没给 = 第二档，就是以前一直用的打法。见 tiers.py
         self.tier: TR.Tier = tier if isinstance(tier, TR.Tier) else TR.get(tier)
         self.reroll = TR.reroll_of(reroll)           # 第一档凹什么：想要 / 不要的首领、事件至少给多少分
@@ -297,6 +300,7 @@ class Walk:
         # 商店：shop_buy = 买不买；shop_rate = 平时只买“每 1 分不超过这么多金币”的；shop_refresh_max = 更新一次最多肯花多少
         self.shop_buy, self.shop_rate, self.shop_refresh_max = bool(shop_buy), float(shop_rate), int(shop_refresh_max)
         self.shop: dict[str, Any] | None = None      # 正在逛的这家商店：更新了几次、买了什么、哪件核对不上不买了
+        self.shop_factor: float | None = None        # 这一局的商店打几折（价是平常的几成；None = 还没逛过商店）。见 strategy.shop_discount
         self.shops: list[dict[str, Any]] = []        # 这一趟逛过的每家商店的小结
         # 编队方式："role" = 认卡片上的职能和属性，按 strategy.py 的规则挑人（阶段 3）；"order" = 老办法，按名单顺序补满
         self.team_mode = team_mode
@@ -1027,6 +1031,59 @@ class Walk:
                     return (cx - 70.0, 550.0, 140.0, 42.0)      # 「选择」在名字正下方，高度是固定的（真机截图上按钮中心 y≈845 → 563）
         return None
 
+    def _sync_hands(self) -> None:
+        """你动过模拟器（我停手让过）以后：我记着的“这一页做到哪一步了”不一定还对得上画面——清掉，照现在的画面重新来。
+
+        2026-11-25 有用户：切窗口时点到了模拟器，我让了 12 秒，接着还按原来排到一半的编队计划走，
+        一看成员栏是空的，就报“队伍编组里一个能上场的角色都没有”停了。现在让过手以后编队从头来（重新看名单、重新排）。"""
+        h = getattr(self.r, "hands", None)
+        n = len(getattr(h, "waits", None) or ())
+        if n == self.hands_seen:
+            return
+        self.hands_seen = n
+        redo = []
+        if self.tb is not None:
+            self.tb = None
+            redo.append("队伍从头排")
+        self.team_expect, self.team_retry, self.team_empty = None, 0, 0
+        if self.shop is not None:                            # 商店本来就是每一步都重新看货架；只把“拖到哪了”这些忘掉
+            self.shop.update(bottom=False, drag_from=None, said=False, blur=0)
+            redo.append("商店的货架重新看")
+        self.guild_view = None
+        self.r.log.say("      你动过画面，我记着的进度不一定还对得上——" + ("、".join(redo) if redo else "照现在的画面接着来") + "。")
+        self.r.log.event("hands_resync", redo=redo)
+
+    def _team_empty_again(self, s: Seen) -> bool:
+        """队伍里一个人都没有、名单里也没挑出人来。可能只是这一眼没看清（名单还在动、刚有东西盖着）：先重新看两遍，一直这样才停。
+        返回 True = 这一次先不停，重新看。"""
+        self.team_empty += 1
+        if self.team_empty > 2:
+            self.r.log.shot(s.img, "team_empty", png=True)
+            return False
+        self.r.log.say(f"      队伍里还没有人，名单里也没挑出能上场的，等一下重新看名单（第 {self.team_empty} 次）。")
+        self.tb = None
+        self.team_expect, self.team_retry = None, 0
+        self.r.pause(0.8 * self.patience + self.beat)
+        return True
+
+    def _on_relic_effect(self, s: Seen) -> None:
+        """「迷宫遗物效果」：手里某件遗物生效、送了东西。只是告诉一声——记一笔，点「关闭」。
+
+        2026-11-26 真机（用拉比林斯开局）：开局三人加入以后弹“凭借拉比林斯之主的效果，获得了以下道具。 噬魂手斧 × 1”。
+        以前不认识这个对话框，等 20 秒就停，所以拉比林斯一直用不了。版面和「出发奖励」是同一个大对话框，「关闭」在同一个位置。
+        送的遗物是哪个系列这里不读（和出发奖励里送的遗物一样，不算进自己记的系列等级）；别的遗物生效时弹的也是这个标题，一样处理。"""
+        r = self.r
+        if time.time() - self.effect_said > 8.0:             # 同一个对话框只记一次（点了没反应再来一遍时不重复记）
+            self.effect_said = time.time()
+            what = ""
+            if ocr.available():
+                rows = [(b[1], b[0], t) for t, b, sc in ocr.read_items(to_norm(s.img))
+                        if sc >= 0.5 and 330 <= b[0] + b[2] / 2 <= 950 and 90 <= b[1] + b[3] / 2 <= 560]
+                what = " ".join(t for _y, _x, t in sorted(rows))
+            r.log.say("      迷宫遗物效果" + (f"：{what}" if what else "（有遗物生效，送了东西）"))
+            r.log.event("relic_effect", text=what)
+        self._tap_wait(s, BOX["depart_reward.close"], "关闭（迷宫遗物效果）")
+
     def _guild_names_seen(self, s: Seen) -> dict[str, float]:
         """公会选择页上这一屏读得到哪几个公会的名字、各在哪（名字中心的 x，1280 宽的坐标）。"""
         out: dict[str, float] = {}
@@ -1601,7 +1658,10 @@ class Walk:
 
         # ---- 队伍定了：自动装备，然后开打（首领战是翻到下一队） ----
         if fill and n_mem == 0:
+            if self._team_empty_again(s):
+                return
             raise Halt("队伍编组里一个能上场的角色都没有")
+        self.team_empty = 0
         if fill and self.team_changed and not self.equip_done and self.auto_equip:
             self._tap_wait(s, BOX["team.equip"], "特别装备（队伍换过人，重新自动装备一次）")
             return
@@ -2129,6 +2189,8 @@ class Walk:
                 self.team_expect = (tv.members + 1, c.cx, c.cy)
             r.pause(self.beat)
         elif tv.members == 0:
+            if self._team_empty_again(s):
+                return
             raise Halt("队伍编组里一个能上场的角色都没有")
         elif self.team_changed and not self.equip_done and self.auto_equip:
             self._tap_wait(s, BOX["team.equip"], "特别装备（队伍换过人，重新自动装备一次）")
@@ -2296,8 +2358,14 @@ class Walk:
         if len(sh["bought"]) >= SHOP_MAX_BUYS or sh["misses"] >= 4:
             self._shop_close(s, "买的件数到上限了" if len(sh["bought"]) >= SHOP_MAX_BUYS else "点了几次「购买」都没买成，不买了")
             return
+        # 这家店打了几折（公会效果，一局里不变）：货架上认得出来的商品一算就知道；这一眼算不出来（都卖完了、只剩不认识的）就沿用这一局前面算出来的
+        seen_f = ST.shop_discount([it.as_list() for it in view.items])
+        if seen_f < 1.0 or self.shop_factor is None:
+            if seen_f < 1.0 and (self.shop_factor is None or abs(seen_f - self.shop_factor) > 0.02):
+                r.log.say(f"      这家商店打折：价是平常的 {seen_f * 100:.0f}%。买不买照平常的价来判断，要留的钱按折后的算。")
+            self.shop_factor = seen_f
         act, idx, why = ST.choose_shop([it.as_list() for it in view.items], view.coins, view.refresh and not sh["no_refresh"],
-                                       sh["refreshes"], self.area >= 5, tuple(sh["skip"]), self.shop_rate)
+                                       sh["refreshes"], self.area >= 5, tuple(sh["skip"]), self.shop_rate, self.shop_factor)
         if act == "buy" and idx is not None:
             it = view.items[idx]
             sh["pending"] = {"item": it.as_list(), "text": it.text, "coins": view.coins, "tries": 0}
@@ -2476,6 +2544,7 @@ class Walk:
         while True:
             s: Seen = r.observe()
             page = s.page
+            self._sync_hands()
             same = same + 1 if page == last else 1
             last = page
             if same > SAME_LIMIT.get(page, SAME_DEFAULT):
@@ -2567,6 +2636,8 @@ class Walk:
                     r.wait_leave(page)
             elif page == "dlg_depart_reward" and self.seen_confirm:
                 self._tap_wait(s, BOX["depart_reward.close"], "关闭")
+            elif page == "dlg_relic_effect" and self.seen_confirm:
+                self._on_relic_effect(s)
             elif page == "dlg_pick3" and self.seen_confirm:
                 self._on_pick3(s)
             elif page == "join_splash" and self.seen_confirm:
@@ -2588,6 +2659,7 @@ class Walk:
                 self.team_changed = self.equip_done = self.auto_done = False
                 self.team_retry, self.team_expect = 0, None
                 self.tb = None
+                self.team_empty = 0
                 if self.want_retreat:                # 打输了决定撤退：从这里回地图
                     self._tap_wait(s, BOX["ready.map"], "查看地图（不打了，回地图撤退）")
                     continue

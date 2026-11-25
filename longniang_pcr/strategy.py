@@ -891,8 +891,12 @@ def choose_relic(options: Sequence[tuple[str | None, int]], levels: dict[str, in
 # 难度 5 的最终分数里，多 1 个迷宫遗物 +400、多 1 名角色 +200（score.py）；遗物几星分数都一样。所以按“每 1 分花多少金币”从便宜到贵买：
 #   ★1 遗物 1,350 ÷ 400 = 3.4    随机印记（多 1 名角色）900 ÷ 200 = 4.5    ★2 遗物 2,100 ÷ 400 = 5.25
 #   ★3 遗物 2,850 ÷ 400 = 7.1    ★4 遗物 7,499 ÷ 400 = 18.7（2026-11-18 真机上区域 4 那家商店卖的）
-# 价格是从画面上读的，所以哪个公会的商店打折，这里自动跟着变。
+# 价格是从画面上读的。有的公会商店打折（咲恋救济院：★1 遗物 1,170、随机印记 780、★2 遗物 1,820，都是平常的 13/15）：
+# 打折是所有东西一起便宜，哪件更划算并没有变，所以**买不买按平常的价来判断**（先算出这家店打了几折，见 shop_discount），
+# 要留的钱按折后的价算。2026-11-25 以前是直接拿折后的价去比下面这几条按平常价定的线，结果在救济院：★2 遗物掉进“划算”线里被当便宜货买，
+# “更新以后至少留 900 买一个印记”这些数也没跟着变。
 SHOP_POINTS = {"relic": 400, "random": 200}
+SHOP_BASE = {("relic", 1): 1350, ("relic", 2): 2100, ("relic", 3): 2850, ("relic", 4): 7499, ("random", None): 900, ("choose", None): 2100}   # 平常的价
 SHOP_MAX_RATE = 5.0             # 平时只买每 1 分不超过这么多金币的（★1 遗物、随机印记）：金币是有限的，留给后面的商店买同样划算的
 SHOP_LAST_RATE = 8.0            # 最后一个区域的商店：金币带不走，这个价以内的（★2、★3 遗物）在更新之前也买，只要不耽误后面买更划算的
 SHOP_REFRESH_COSTS = (300, 600)  # 一家商店能更新两次，第一次 300、第二次 600（录制里两家商店都是；实际花多少以「更新确认」上读到的为准）
@@ -912,8 +916,24 @@ def shop_rate(kind: str | None, price: int | None) -> float | None:
     return price / pts if pts and price else None
 
 
+def shop_discount(items: Sequence[Sequence]) -> float:
+    """这家商店的价是平常的几成（不打折 = 1.0）。看货架上认得出来的每一件：读到的价 ÷ 平常的价，取大多数商品都对得上的那个数。
+
+    卖掉的、钱不够的也算（价照样读得出）；星数没认出来的遗物、不认识的东西不算。个别商品星数认错了会算出一个离谱的比例——
+    所以不取平均，取“最多商品一致”的那个比例；一样多时取更接近不打折的。认不出就当不打折。"""
+    ratios = []
+    for kind, stars, _series, _role, price, _state in items:
+        base = SHOP_BASE.get((kind, stars if kind == "relic" else None))
+        if base and price and 0.6 <= price / base <= 1.02:
+            ratios.append(price / base)
+    if not ratios:
+        return 1.0
+    best = max(ratios, key=lambda r: (sum(1 for x in ratios if abs(x - r) <= 0.015), r))
+    return 1.0 if best >= 0.985 else best
+
+
 def choose_shop(items: Sequence[Sequence], coins: int | None, can_refresh: bool, refreshes_done: int = 0, last: bool = False,
-                skip: Sequence[tuple] = (), max_rate: float = SHOP_MAX_RATE) -> tuple[str, int | None, str]:
+                skip: Sequence[tuple] = (), max_rate: float = SHOP_MAX_RATE, discount: float | None = None) -> tuple[str, int | None, str]:
     """商店里下一步做什么。items = [(种类, 星数, 系列, 职能, 价格, 状态), …]（vision.shop.Item.as_list()）。
 
     items 可以只是现在看得见的那几件（列表要拖着看）：流程里看得见的没有要买的就往下拖，拖到底了才照这里说的更新 / 离开。
@@ -927,7 +947,11 @@ def choose_shop(items: Sequence[Sequence], coins: int | None, can_refresh: bool,
        不是最后一个区域：贵一点的只有钱富余（买完还剩 SHOP_CARRY 以上）才买；
        卖 ★4 遗物的那种店（看得见 SHOP_TRAP 以上的遗物）：印记照买，钱富余再买 ★3 的宝珠，不更新；
     4. 「选择印记」不买（买了要进一个没见过的选人页面）；认不出、价格读不出、skip 里的（上次核对金额没对上）也不买。
+    5. 商店打折（discount = 价是平常的几成；不给就从 items 里算）：划不划算按平常的价比（折后的价 ÷ discount），要留的钱按折后的算；
+       更新的花费不打折，照实算。
     """
+    f = float(discount) if discount else shop_discount(items)
+    f = f if 0.5 <= f <= 1.0 else 1.0
     cands = []
     for i, it in enumerate(items):
         kind, stars, series, role, price, state = it
@@ -938,34 +962,36 @@ def choose_shop(items: Sequence[Sequence], coins: int | None, can_refresh: bool,
             (SHOP_ROLE_ORDER.index(role) if role in SHOP_ROLE_ORDER else len(SHOP_ROLE_ORDER))
         cands.append((rate, 0 if kind == "relic" else 1, pref, i))
     cands.sort()
-    good = [c for c in cands if c[0] <= max_rate]
+    good = [c for c in cands if c[0] / f <= max_rate]
     left = SHOP_REFRESH_COSTS[min(refreshes_done, len(SHOP_REFRESH_COSTS)):] if can_refresh else ()
     if can_refresh and not left:                         # 按钮还亮着但已经更新过两次了：没见过，按最后一档的价钱算
         left = SHOP_REFRESH_COSTS[-1:]
-    trap = any(it[0] == "relic" and it[4] and it[4] >= SHOP_TRAP for it in items)
+    trap = any(it[0] == "relic" and it[4] and it[4] / f >= SHOP_TRAP for it in items)
     if trap and not last:
         left = ()                                        # 卖 ★4 遗物的店：不更新（攻略里都只买它的印记；它更新出来是什么没见过），印记直接买
     if good:
         rate, _, _, i = good[0]
         price = items[i][4]
-        need = sum(left) + SHOP_RELIC_SET * len(left)                    # 后面每更新一次，留够买那一批 ★1 遗物的钱
-        if rate <= SHOP_BEST_RATE or coins is None or not left or coins - price >= need:
+        need = sum(left) + SHOP_RELIC_SET * f * len(left)                # 后面每更新一次，留够买那一批 ★1 遗物的钱
+        if rate / f <= SHOP_BEST_RATE or coins is None or not left or coins - price >= need:
             return "buy", i, f"每 1 分 {rate:.1f} 金币"
-        if coins >= left[0] + SHOP_KEEP:
-            return "refresh", None, f"钱不多，印记先不买，花 {left[0]} 更新一批看有没有 ★1 遗物"
-        return "buy", i, f"每 1 分 {rate:.1f} 金币"
+        # 钱不够两头都顾：更新是为了等 ★1 遗物——更新完得买得起一个才值得更新（2026-11-25 以前只要求“买得起一个印记”：
+        # 真机上 1,730 金币花 600 更新，剩 1,130，★1 遗物 1,170 差 40 买不起，白花了更新的钱，还把货架上现成的印记换没了）
+        if coins - left[0] >= SHOP_BASE[("relic", 1)] * f:
+            return "refresh", None, f"钱不多，{'印记' if items[i][0] == 'random' else '这件'}先不买，花 {left[0]} 更新一批看有没有 ★1 遗物"
+        return "buy", i, f"每 1 分 {rate:.1f} 金币（更新完也买不起 ★1 遗物，不更新了）"
     if last and cands and coins is not None:
         rate, _, _, i = cands[0]
         price = items[i][4]
-        reserve = sum(left) + SHOP_SET_COST * len(left)                  # 后面每更新一次，留够买那一批划算货的钱
-        if (not left) or (rate <= SHOP_LAST_RATE and coins - price >= reserve):
+        reserve = sum(left) + SHOP_SET_COST * f * len(left)              # 后面每更新一次，留够买那一批划算货的钱
+        if (not left) or (rate / f <= SHOP_LAST_RATE and coins - price >= reserve):
             return "buy", i, f"最后一个区域，金币带不走（每 1 分 {rate:.1f} 金币）"
     if not last and cands and coins is not None:
         rate, _, _, i = cands[0]
         price = items[i][4]
-        if rate <= SHOP_LAST_RATE and coins - price >= SHOP_CARRY + sum(left) + SHOP_SET_COST * len(left):
+        if rate / f <= SHOP_LAST_RATE and coins - price >= (SHOP_CARRY + SHOP_SET_COST * len(left)) * f + sum(left):
             return "buy", i, f"钱富余，买完还剩 {coins - price:,}（每 1 分 {rate:.1f} 金币）"
-    if left and (coins is None or coins >= left[0] + SHOP_KEEP):
+    if left and (coins is None or coins >= left[0] + SHOP_KEEP * f):
         return "refresh", None, f"划算的买完了，花 {left[0]} 更新一批"
     if cands and not last:
         return "leave", None, "剩下的不划算（留着金币去后面的商店买便宜的）"

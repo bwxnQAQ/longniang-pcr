@@ -94,6 +94,9 @@ BOX.update({
     "chest.ok": (540, 622, 200, 34),              # 宝箱开封结果的「确认」
     "chest.open": (560, 470, 260, 60),            # 宝箱开封结果：宝箱还没翻开时，点对话框下半截的空白处翻开
     "daychange.ok": (540, 474, 200, 40),          # 日期变更的「确认」（2026-11-24 真机截图上量的：按钮 503～775 × 463～527）
+    "sort.lv": (92, 293, 22, 20),                 # 「分类」里“显示顺序”的第一个选项「等级」前面那个圆点
+    "sort.ok": (700, 624, 170, 32),               # 「分类」的「确认」（用户截图上按钮 650～922 × 610～668）
+    "sort.cancel": (410, 624, 170, 32),           # 「分类」的「取消」（357～630 × 610～668）
     "notice.ok": (550, 478, 180, 34),             # 只有一个「确认」的提示框（“无法获得报酬。”）：按钮和购买完毕的「确认」在同一个位置
 })
 OUTSIDE = ("lab_home", "home", "adventure", "guild_select", "dlg_guild_confirm", "dlg_daychange")     # 还没进到一局里面的页面
@@ -128,7 +131,7 @@ MOVE_KEYS = ["move_normal", "move_extreme", "move_mark", "move_relic", "move_eve
 MOVE_NAMES = {"normal": "战斗格子（普通）", "extreme": "战斗格子（极难）", "mark": "连结印记格子", "relic": "迷宫遗物格子",
               "event": "事件格子", "shop": "商店格子", "boss": "首领战格子"}
 PICK_KEYS = ["pick_0", "pick_1", "pick_2", "pick_3"]
-EVENT_KEYS = ["ev_arena", "ev_lost", "ev_box", "ev_tablet", "ev_guild_office", "ev_venue", "ev_picnic", "ev_picnic2", "ev_slot2", "ev_janken"]
+EVENT_KEYS = ["ev_arena", "ev_lost", "ev_box", "ev_tablet", "ev_guild_office", "ev_venue", "ev_picnic", "ev_picnic2", "ev_slot2", "ev_janken", "ev_slot"]
 EVENT_NAMES = {"arena": "斗技场", "lost": "迷路", "box": "箱子", "tablet": "石板", "guild_office": "公会管理协会",
                "venue": "活动会场出现了魔物（纯）",       # 2026-11-19 真机上第一次见：右边是“纯成为伙伴 + 全体随机印记 ×2～4”，用户定的选纯
                "picnic": "郊游做料理",                    # 2026-11-24 真机上第一次见：只有一个选项（50% 概率进入下一个事件）
@@ -138,8 +141,11 @@ EVENT_NAMES = {"arena": "斗技场", "lost": "迷路", "box": "箱子", "tablet"
                # 18:38 用户说保持选左边；19:28 改主意：押（见 _slot_pick——只押“消耗 2000”这一步、一个事件格里只押一次、金币要够）。
                # 选了左边会弹一个「确认」框“无法获得报酬。”——见主循环里的 dlg_no_reward；押完以后出什么还没见过
                "slot2": "再较量一次（押金币）",
+               # 老虎机的第一步「是老虎机！要挑战吗？」：只有一个选项（50% 概率获得阿尔法金币 ×2000 并进入下一个事件），不花钱。
+               # 2026-11-26 玩家排查包里见到两次：赢了那次金币 4,950 → 6,950（当场进口袋），接着就是「再较量一次！」；输了那次 +500（保底）
+               "slot": "老虎机（要挑战吗）",
                "janken": "石头剪刀布"}                    # 2026-11-26 玩家排查包里第一次见：三项一样（赢了 3000 金币、输了 1000），选哪个都行
-EVENT_OPTIONS = {"arena": 2, "lost": 2, "box": 2, "tablet": 3, "guild_office": 2, "venue": 2, "picnic": 1, "picnic2": 2, "slot2": 2, "janken": 3}
+EVENT_OPTIONS = {"arena": 2, "lost": 2, "box": 2, "tablet": 3, "guild_office": 2, "venue": 2, "picnic": 1, "picnic2": 2, "slot2": 2, "janken": 3, "slot": 1}
 # 公会管理协会：给出一组两种职能，二选一。计划里定的选法（每组里选哪个）：
 #   坦克 / 治疗 → 治疗（队里只有 1 名坦克时选坦克——这条要能读出队伍职能才做得了，留到阶段 3）
 #   攻击 / 破坏 → 破坏；辅助 / 增益 → 增益；减益 / 干扰 → 减益
@@ -295,6 +301,8 @@ class Walk:
         self.reroll = TR.reroll_of(reroll)           # 第一档凹什么：想要 / 不要的首领、事件至少给多少分
         self.ev_before: dict[str, Any] | None = None  # 刚走上一个事件格：走之前地图上的数字（事件完了拿来算这个事件给了多少）
         self.ev_area = 0
+        self.sort_tries = 0                          # 这一场战斗的队伍编组里，为了把排序换回「等级」点开过几次「分类」
+        self.sort_taps = 0                           # 「分类」里点过几次「等级」那个圆点还没选上
         self.slot_bets = 0                           # 这一个事件格里已经押过几次金币（「再较量一次！」只押一次；走上事件格时清零）
         self.bet_watch = 0                           # 刚押完：接下来这么多个画面各存一张原图（押完以后出什么还没见过，留着以后补认法）
         self.event_gains: list[float | None] = []    # 这一趟每个事件折成多少分
@@ -1042,7 +1050,7 @@ class Walk:
                 r.pause(self.beat)
                 return
             if tv.tab == 1 and tv.members == 0:
-                raise Halt("首领战的队伍编组里一个能上场的角色都没有")
+                raise Halt("首领战的队伍编组里一个能上场的角色都没有" + self._no_cards_why(s))
             if tv.members > 0 and self.team_changed and not self.equip_done and self.auto_equip:
                 self._tap_wait(s, BOX["team.equip"], f"特别装备（队伍 {tv.tab} 换过人，自动装备一次）")
                 return
@@ -1094,6 +1102,60 @@ class Walk:
         self.guild_view = None
         self.r.log.say("      你动过画面，我记着的进度不一定还对得上——" + ("、".join(redo) if redo else "照现在的画面接着来") + "。")
         self.r.log.event("hands_resync", redo=redo)
+
+    def _fix_sort(self, s: Seen) -> bool:
+        """队伍编组右上角的排序不是「等级」、卡片上的“等级”两个字也因此没了：点开「分类」把它换回来。动了手返回 True（外面重新看画面）。
+
+        工具找名单里的卡片，靠的是每张卡左上角的“等级”两个字。排序选了别的（战力、★数、攻击力……十几种），那里写的就不是这两个字了，
+        一张卡都找不到（2026-11-26 玩家排查包：排序是「战力」，报“队伍编组里一个能上场的角色都没有”停了）。
+        用户定的：不去认别的写法，工具自己把排序换回「等级」。"""
+        r = self.r
+        state, box, lv = TM.sort_state(r.book, s.img)
+        if state != "other" or box is None:
+            return False
+        # 按别的排、可卡片上写的还是“等级”（比如「编组顺序」）：认得出来，不用动。名单里没头像（空的、还没显示出来）也不动
+        if TM.card_labels(r.book, s.img) or not TM.list_has_faces(s.img):
+            return False
+        if self.sort_tries >= 2:
+            r.log.shot(s.img, "sort_stuck", png=True)
+            raise Halt("队伍编组右上角的排序不是「等级」，我点开改了 2 次都没改过来——请手动把它改成「等级」再开始")
+        self.sort_tries += 1
+        r.log.shot(s.img, "sort_not_level", png=True)
+        r.log.say("      队伍编组右上角的排序不是「等级」（这样卡片左上角写的不是“等级”，我认不出卡片）：点开排序，改回「等级」。")
+        r.log.event("sort_fix", what="open", n=self.sort_tries, lv=round(lv, 3))
+        if r.tap(s, box, "排序（点开「分类」，把显示顺序改回「等级」）") != "changed":
+            r.wait_leave(s.page, 4.0 * self.patience + 2.0)
+        return True
+
+    def _on_sort(self, s: Seen) -> None:
+        """「分类」对话框（队伍编组右上角的排序按钮点开的）：选“显示顺序”里的「等级」，点「确认」。
+        「等级」不在老地方（列表被拖过、版面变了）就不乱点：点「取消」，停下交给你。上面“排序方式”那两个选项不碰。"""
+        r = self.r
+        if not r.book.has_mark(s.img, "sort_opt_lv") or self.sort_taps >= 3:
+            r.log.shot(s.img, "sort_unsure", png=True)
+            why = "点了 3 次「等级」都没选上" if self.sort_taps >= 3 else "没在老地方看到“等级”这个选项"
+            r.log.event("sort_fix", what="give_up", why=why)
+            self._tap_wait(s, BOX["sort.cancel"], f"取消（「分类」里{why}，不乱点）")
+            raise Halt(f"想把队伍编组的排序改回「等级」，可是「分类」里{why}——请手动把排序改成「等级」再开始")
+        if not TM.sort_lv_selected(s.img):
+            self.sort_taps += 1
+            r.tap(s, BOX["sort.lv"], "等级（显示顺序）")
+            r.pause(0.4 * self.patience + self.beat)
+            return
+        self.sort_taps = 0
+        if self._tap_wait(s, BOX["sort.ok"], "确认（按等级排序）") != "changed":
+            self.tb = None                           # 名单的顺序变了：编队从头看、从头排
+            self.team_expect, self.team_retry, self.team_empty = None, 0, 0
+            r.log.event("sort_fix", what="done")
+
+    def _no_cards_why(self, s: Seen) -> str:
+        """名单里一张卡都没认出来，可画面上明明有头像：多半是卡片左上角写的不是“等级”（右上角的排序选了别的）。停下时把这句带上。"""
+        try:
+            if TM.list_has_faces(s.img) and not TM.card_labels(self.r.book, s.img):
+                return "（名单里有头像，可是卡片左上角写的不是“等级”——请把队伍编组右上角的排序改成「等级」再开始）"
+        except Exception:  # noqa: BLE001 —— 说不出原因不影响停下
+            pass
+        return ""
 
     def _team_empty_again(self, s: Seen) -> bool:
         """队伍里一个人都没有、名单里也没挑出人来。可能只是这一眼没看清（名单还在动、刚有东西盖着）：先重新看两遍，一直这样才停。
@@ -1702,7 +1764,7 @@ class Walk:
         if fill and n_mem == 0:
             if self._team_empty_again(s):
                 return
-            raise Halt("队伍编组里一个能上场的角色都没有")
+            raise Halt("队伍编组里一个能上场的角色都没有" + self._no_cards_why(s))
         self.team_empty = 0
         if fill and self.team_changed and not self.equip_done and self.auto_equip:
             self._tap_wait(s, BOX["team.equip"], "特别装备（队伍换过人，重新自动装备一次）")
@@ -2233,7 +2295,7 @@ class Walk:
         elif tv.members == 0:
             if self._team_empty_again(s):
                 return
-            raise Halt("队伍编组里一个能上场的角色都没有")
+            raise Halt("队伍编组里一个能上场的角色都没有" + self._no_cards_why(s))
         elif self.team_changed and not self.equip_done and self.auto_equip:
             self._tap_wait(s, BOX["team.equip"], "特别装备（队伍换过人，重新自动装备一次）")
         else:
@@ -2745,6 +2807,7 @@ class Walk:
                 self.team_retry, self.team_expect = 0, None
                 self.tb = None
                 self.team_empty = 0
+                self.sort_tries = self.sort_taps = 0
                 if self.want_retreat:                # 打输了决定撤退：从这里回地图
                     self._tap_wait(s, BOX["ready.map"], "查看地图（不打了，回地图撤退）")
                     continue
@@ -2761,7 +2824,10 @@ class Walk:
             elif page == "defeat" and self.seen_pick3:
                 self._on_defeat(s)
             elif page == "dlg_team" and self.seen_pick3:
-                self._on_team(s)
+                if not self._fix_sort(s):            # 排序不是「等级」的话先换回来（认卡片靠的是卡片上的“等级”两个字）
+                    self._on_team(s)
+            elif page == "dlg_sort" and self.seen_pick3:
+                self._on_sort(s)
             elif page == "dlg_equip" and self.seen_pick3:
                 if not self.auto_done:
                     self._tap_wait(s, BOX["equip.auto"], "自动装备")

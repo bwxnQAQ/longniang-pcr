@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 from .pages import PageBook, to_norm
+from .team import card_labels
 
 ROLES = ("tank", "heal", "attack", "break", "support", "buff", "debuff", "jam")
 ATTRS = ("fire", "water", "wind", "light", "dark")
@@ -147,6 +148,7 @@ def list_cards(book: PageBook, img: np.ndarray) -> list[Card]:
     """「队伍编组」名单里现在看得见的角色卡（普通战斗和首领战通用）。
 
     不按固定格子找，而是找每张卡左上角的“等级”两个字——名单被滑动过也照样对得上。
+    右上角的排序要是「等级」才行：选了别的（比如「战力」），那里写的就不是“等级”了。
     """
     norm = to_norm(img)
     checks = [(x, y) for _, (x, y, _, _) in book.find_all(img, "team_check", max_n=24)]
@@ -159,7 +161,7 @@ def list_cards(book: PageBook, img: np.ndarray) -> list[Card]:
         return _card(book, norm, cx, cy, selected=sel, busy=busy)
 
     found: list[Card] = []
-    for _, (lx, ly, _, _) in book.find_all(img, "team_lv", min_gap=30, max_n=40):
+    for lx, ly in card_labels(book, img, min_gap=30, max_n=40):
         cx, cy = lx + LV_TO_CENTER[0], ly + LV_TO_CENTER[1]
         k = round((cx - PICK_X0) / PICK_DX)
         if abs(cx - (PICK_X0 + PICK_DX * k)) > 6 or not 0 <= k < COLS:     # 不在列上的不是卡片（右上角排序按钮上也写着“等级”）

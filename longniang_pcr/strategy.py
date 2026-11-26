@@ -55,6 +55,10 @@
   · 攻略点名要范围输出的关（need_hit = aoe：回复装置、破防装置、炸弹装置、美空……）以前只是“加一点分”，被同属性加成和“沿用赢过的人”盖过去，
     排出来的还是一队打单体的。现在：**极难关**里这种关会打一群的输出至少要 AOE_WANT 个（名单里没那么多就有几个带几个）；首领战不动。
     页面上没有名字、画面也认不出是哪一组的极难关，按“要范围输出”排（没见过的那两组——回复装置、炸弹装置——攻略都点名要范围输出）。
+- 2026-11-27 早上（正式版 V1.07，用户转述玩家的反馈）：“总是上自己没有的角色。自己没有的角色在黎明界也可以用，但是练度低。逻辑最优先上玩家有的角色，
+  玩家有的角色在首次登录扫描过了。”——Unit.owned（chars.owns：「读角色」读到过的才算有）。玩家自己没有的角色每上一个扣 UNOWNED，比别的哪一条都大；
+  只留一个口子：一队里至少要有 OWN_DEALERS 个输出，玩家自己有的输出不够数时，缺的那几个输出位上借来的不扣（不然会排出一队全是辅助的）。
+  开局选人、战斗后招募也是自己有的排前面。战斗估算把借来的角色当满练度算，所以估算挑队时同样先扣（advisor.OFF_OWN）。没读过角色时这一条不起作用。
 
 出处（细节见开发计划「策略细则」）：
 - note ω4.1《黎明界ラビリンスで「スコアを高くするために」考えていること》（日服，目标极难全踩、稳定 5 万分）：
@@ -169,6 +173,8 @@ NO_DEALER = 60.0                                       # 一队里一个输出�
 SPREAD_NEAR = 200.0                                    # 对策表写了 spread（敌人的大招打“最前面的人和她周围”：幽灵领主）：除了最前面那个人，每多一个站在这个范围里的扣这么多
                                                        # ——比“攻略点名的效果”（MECH 150）还大：带降魔攻的人站在范围里一样会一起倒，先把站位拉开，再在这样的队里挑人
 AOE_WANT = 3                                           # 极难关里攻略点名要范围输出（need_hit = aoe）的：队里会打一群的输出至少要这么多个（名单里没那么多就有几个带几个）
+UNOWNED = 400.0                                        # 玩家自己没有的角色（黎明界借来的，练度低）：每上一个扣这么多——比站位、保命位、点名的效果都大，最优先上自己有的
+OWN_DEALERS = 2                                        # 但一队里至少要有这么多个输出：玩家自己有的输出不够数时，缺的那几个输出位上借来的不扣
 REPEAT_AVOID = 25.0                                    # 排出来的队和输过的某一队一模一样：把这一队里不是保命位的人各扣这么多再排一次
 KEEP = 0.6                                             # 已经在队里的人：分数一样时不换，少点几下
 MARK_ORDER = ["dark", "fire", "light", "water", "wind"]
@@ -214,6 +220,7 @@ class Unit:
     tough: float = 0.0                                  # 耐打程度（data/characters.json 的 tough）：按生命值、物防、魔防算，一般坦克 = 1；不认识名字是 0
     tough_p: float | None = None                        # 只算挨物理伤害时的耐打程度（data/characters.json 的 tough_phys，一般坦克 = 1）；没有资料是 None，用 tough 代替
     tough_m: float | None = None                        # 只算挨魔法伤害时的（tough_magic）
+    owned: bool | None = None                           # 玩家自己有没有这个角色（「读角色」读到的）：False = 没有，是黎明界借来的、练度低；None = 说不准，当成有
 
     @property
     def kind(self) -> str | None:
@@ -286,6 +293,26 @@ def fit_targets(u: Unit, targets: str | None) -> float:
     if targets == "multi":
         return AOE_FIT if u.hit in ("aoe", "both") else -AOE_MISS
     return ONE_FIT if u.hit in ("single", "both") else -ONE_MISS
+
+
+def own_dealers(units: Iterable[Unit]) -> int:
+    """名单里玩家自己有的输出（攻击 / 破防）有几个；同一个角色的几个版本只算一个。说不准有没有的当成有。"""
+    return len({u.base or u.name or id(u) for u in units if u.kind in DAMAGE and u.owned is not False})
+
+
+def unowned_cost(team: Sequence[Unit], own_n: int | None = None) -> int:
+    """这一队里有几个“玩家自己没有、而且本来可以不上”的角色。own_n = 名单里玩家自己有的输出个数（own_dealers）：
+    一队起码要有 OWN_DEALERS 个输出；自己有的输出不到这个数时，缺几个，队里借来的输出就有几个不算——
+    前提是自己有的输出已经先上了（放着自己的输出不用、拿借来的顶，照样算）。own_n 不知道就都算。"""
+    lent = [u for u in team if u.owned is False]
+    if not lent:
+        return 0
+    if own_n is None:
+        return len(lent)
+    want = min(OWN_DEALERS, max(0, int(own_n)))        # 自己有的输出里，起码该上这么多个
+    if sum(1 for u in team if u.kind in DAMAGE and u.owned is not False) < want:
+        return len(lent)
+    return len(lent) - min(OWN_DEALERS - want, sum(1 for u in lent if u.kind in DAMAGE))
 
 
 def crowd(team: Sequence[Unit], gap: float) -> int | None:
@@ -495,6 +522,7 @@ def team_score(team: Sequence[Unit], profile: str, weak: str | None = None, twea
     if (tweak or {}).get("heal_back") and front is not None and len(team) >= 4:
         back = sorted(team, key=lambda z: z.pos)[-2:]
         total += sum((HEAL_BACK if any(u is b for b in back) else -HEAL_BACK) for u in team if can_heal(u))
+    total -= UNOWNED * unowned_cost(team, (tweak or {}).get("_own"))      # 玩家自己没有的角色：最优先不上
     facts = (tweak or {}).get("_facts")
     if (tweak or {}).get("strict") and facts:        # 极难关按攻略来：和攻略点名的要求每差一个都重扣（名单里做不到的不算）
         total -= GUIDE_GAP * sum(n for _, n in guide_gaps(team, facts, tweak))
@@ -533,10 +561,10 @@ def _shortlist(units: Sequence[Unit], weak: str | None, cap: int = 30, must_tags
             if len(keep) < cap:
                 keep.setdefault(id(u), u)
 
-    rank = lambda z: (-z.power, z.attr != weak, not z.hit, not z.selected, z.order)      # noqa: E731
+    rank = lambda z: (z.owned is False, -z.power, z.attr != weak, not z.hit, not z.selected, z.order)      # noqa: E731  玩家自己有的排在借来的前面
     of = lambda kind: sorted((u for u in units if u.kind == kind), key=rank)             # noqa: E731
-    tanks = sorted((u for u in units if u.kind == "tank"), key=lambda z: (z.pos if z.pos is not None else 9999, -z.power, z.order))
-    healers = sorted((u for u in units if can_heal(u)), key=lambda z: (-z.power, -z.heal, z.order))
+    tanks = sorted((u for u in units if u.kind == "tank"), key=lambda z: (z.owned is False, z.pos if z.pos is not None else 9999, -z.power, z.order))
+    healers = sorted((u for u in units if can_heal(u)), key=lambda z: (z.owned is False, -z.power, -z.heal, z.order))
     add(sorted((u for u in units if u.effective or (must_tags & u.tags)), key=rank)[:5])
     if "tank" in need:
         add(tanks[:2])
@@ -731,6 +759,8 @@ def choose_team(units: Sequence[Unit], kind: str = "normal", weak: str | None = 
         if attempt == 0:                             # 第一次打：不管对策表和游戏怎么说，先不上坦克治疗（写了 always 的除外）
             tweak = first_try(tweak)
     must = [u for u in must]
+    if any(u.owned is False for u in units) and "_own" not in (tweak or {}):      # 名单里有借来的角色：玩家自己有的输出有几个，先数好
+        tweak = {**(tweak or {}), "_own": own_dealers(units)}
     if (tweak or {}).get("strict") and "_facts" not in tweak:                   # 极难关按攻略来：名单里做得到什么，先算好
         tweak = {**tweak, "_facts": roster_facts(units, tweak)}
     if any(u.kind == "tank" for u in units):          # 名单里有坦克：要坦克就带真坦克，不拿别人顶
@@ -749,7 +779,7 @@ def choose_team(units: Sequence[Unit], kind: str = "normal", weak: str | None = 
             pool = _shortlist(inside, weak, cap=CONCEPT_CAP, must_tags=want_tags, small=CONCEPT_CAP, need=list((tweak or {}).get("need") or []))
             outside = [u for u in rest if not _fits(u, sd, at)]
             marked = [u for u in outside if u.effective or (want_tags & u.tags)]             # 攻略点名的对策角色：不合路线也放进来
-            strong = sorted((u for u in outside if not any(u is m for m in marked)), key=lambda z: (-z.power, z.order))
+            strong = sorted((u for u in outside if not any(u is m for m in marked)), key=lambda z: (z.owned is False, -z.power, z.order))
             fill = (marked + strong)[:max(CONCEPT_FILL, n0 - len(pool))] if at is None else marked[:CONCEPT_FILL]
             pool = sorted(pool + fill, key=lambda z: z.order)
             n, got = n0, None
@@ -852,14 +882,17 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
                    attr_order: Sequence[str] = MARK_ORDER, tags: Sequence[frozenset] | None = None,
                    atks: Sequence[str | None] | None = None, side: str | None = None,
                    powers: Sequence[float] | None = None, wants: dict[str, Any] | None = None,
-                   heals: Sequence[float] | None = None) -> tuple[int, str]:
+                   heals: Sequence[float] | None = None, owned: Sequence[bool | None] | None = None) -> tuple[int, str]:
     """战斗后三选一。cands = [(职能, 属性), …]；tags = 每个人的特点、atks = 物理还是魔法（认出名字才有）；
     heals = 每个人会不会给全队回血（≥1 算有奶：后面的首领要奶时，有奶的强力角色和纯治疗一样算数）；
     side = 现在在凑物理队还是法队（roster_side）；powers = 每个人的强度档；
     wants = 这一局后面两个首领要的东西 {"roles": [还缺的职能], "tags": [还缺的效果]}（开局看过首领才有）。返回（选第几个，为什么）。
     先补缺的职能（输出优先）；后面的首领点名要、名单里还没有的排最前；强的人、有开局充能 / 持续伤害 / 降攻这类特点的人往前排；
-    职能一样先看是不是正在凑的那一边，再看强度，再看属性。"""
+    职能一样先看是不是正在凑的那一边，再看强度，再看属性。
+    owned = 每个人玩家自己有没有（False = 没有，是借来的、练度低）：自己有的排在最前面，三个里有自己有的就不拿借来的。"""
     want = wanted_roles(have)
+    owned = list(owned) if owned is not None else [None] * len(cands)
+    lent = lambda i: owned[i] is False      # noqa: E731
     tags = list(tags) if tags is not None else [frozenset()] * len(cands)
     atks = list(atks) if atks is not None else [None] * len(cands)
     powers = list(powers) if powers is not None else [1] * len(cands)
@@ -882,7 +915,7 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
 
     def rank(i: int) -> tuple:
         role, attr = cands[i]
-        return ((want.index(role) if role in want else 99) - boost(i), off(i), -powers[i], attr_order.index(attr) if attr in attr_order else 9, i)
+        return (lent(i), (want.index(role) if role in want else 99) - boost(i), off(i), -powers[i], attr_order.index(attr) if attr in attr_order else 9, i)
 
     best = min(range(len(cands)), key=rank)
     role, attr = cands[best]
@@ -899,6 +932,11 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
         why += "，而且有" + "、".join(TAG_CN.get(t, t) for t in sorted(tags[best]) if t in RECRUIT_TAGS)
     if side in SIDES and atks[best] == side and any(off(i) for i in range(len(cands))):
         why += f"，正在凑{SIDE_CN[side]}"
+    n_lent = sum(1 for i in range(len(cands)) if lent(i))
+    if lent(best):
+        why += "；三个都不是你自己的角色（练度低）" if n_lent == len(cands) else ""
+    elif n_lent:
+        why = f"是你自己的角色（另外{'那个' if n_lent == 1 else f' {n_lent} 个'}不是，练度低）；" + why
     return best, why
 
 
@@ -906,11 +944,11 @@ def choose_start(cands: Sequence[tuple[str | None, str | None]], n: int = 3, att
                  names: Sequence[str | None] | None = None, tags: Sequence[frozenset] | None = None,
                  atks: Sequence[str | None] | None = None, bases: Sequence[str | None] | None = None,
                  funcs: Sequence[str | None] | None = None, aids: Sequence[str | None] | None = None,
-                 powers: Sequence[float] | None = None) -> list[int]:
+                 powers: Sequence[float] | None = None, owned: Sequence[bool | None] | None = None) -> list[int]:
     """开局从公会成员里挑 n 个：当成一支只有 n 个人的快攻队来挑——输出、破防、回 TP 的强化型、增益优先，坦克和治疗不到没人可选不拿；
     物理和魔法不混；同一个角色的不同版本不能同时上场，所以不重复拿；别的都一样时看属性（暗 = 火 > 光 > 水 > 风）。
     names / tags / atks / bases / funcs / aids 是每张卡认出来的名字、特点、物理还是魔法、本名、实际按哪种职能用、增益给哪边（认不出就是 None）。
-    返回选中的第几张（从 0 数）。"""
+    owned = 每张卡玩家自己有没有（False = 没有，练度低）：自己有的优先拿。返回选中的第几张（从 0 数）。"""
     def opt(lst: Sequence | None, i: int, default: Any = None) -> Any:
         return lst[i] if lst is not None and i < len(lst) and lst[i] is not None else default
 
@@ -918,7 +956,8 @@ def choose_start(cands: Sequence[tuple[str | None, str | None]], n: int = 3, att
         return list(range(min(n, len(cands))))
     by_attr = sorted(range(len(cands)), key=lambda i: (attr_order.index(cands[i][1]) if cands[i][1] in attr_order else 9, i))
     units = [Unit(i, cands[i][0], cands[i][1], order=by_attr.index(i), name=opt(names, i), tags=opt(tags, i, frozenset()),
-                  atk=opt(atks, i), base=opt(bases, i), func=opt(funcs, i), aid=opt(aids, i), power=float(opt(powers, i, 1))) for i in range(len(cands))]
+                  atk=opt(atks, i), base=opt(bases, i), func=opt(funcs, i), aid=opt(aids, i), power=float(opt(powers, i, 1)),
+                  owned=(owned[i] if owned is not None and i < len(owned) else None)) for i in range(len(cands))]
     picked = sorted(u.key for u in choose_team(units, "normal", size=n, tweak=START_AVOID, targets="multi").team)
     for i in range(len(cands)):                       # 凑不满（比如名单里全是同一个角色）：按顺序补
         if len(picked) >= min(n, len(cands)):

@@ -140,6 +140,11 @@ class RosterScan:
             raise Halt("这台电脑上的文字识别（OCR）没装好，读不了名字：" + ocr.why_missing())
         self.log.event("ocr", line=ocr.line_mode())
         entered = tapped_first = False
+        done = False                                  # 转了一圈回到第一个角色（或者名单到头了）= 读完了
+        # 以前完整读过一遍的（老的库没有这个记号、但读到的不少，也算）：这一次中途停下也不作废——读到的头像是攒着的，只会多不会少。
+        # 从来没读完过的：先记成“没读完”，中途停下的话，这份名单不拿来判断“有没有这个角色”
+        if not (self.chars.scan.get("done") or (not self.chars.scan and len(self.chars.roster) >= 30)):
+            self.chars.scan = {"done": False, "count": 0}
         first: np.ndarray | None = None               # 第一个角色的头像：转一圈回到它就算读完
         prev: np.ndarray | None = None
         last_read: tuple[str, np.ndarray] | None = None
@@ -187,11 +192,13 @@ class RosterScan:
                 stuck += 1
                 if stuck >= 3:
                     self.log.say("  点了几次 ▶ 都还是同一个角色：名单只有这些，结束。")
+                    done = True
                     break
             else:
                 stuck = 0
                 if first is not None and CD.same_card(first, fp) >= 0.9:
                     self.log.say("  又回到了第一个角色：全部读完。")
+                    done = True
                     break
                 self.count += 1
                 how = self.chars.add_sighting(base, fp, icon["role"], icon["attr"], text=self.text)
@@ -224,9 +231,12 @@ class RosterScan:
             self._tap(NEXT_BOX, "▶ 下一个角色")
             last_read = None
             self._wait(0.6)
+        # 读完一圈了才算数：编队时要靠这份名单分“玩家自己有的角色”和“黎明界借的角色”，只读了一半的话没读到的会被当成没有
+        if done:
+            self.chars.scan = {"done": True, "count": self.count}
         st = self.chars.resolve_sightings()
         self.chars.save()
-        res = {"ok": True, "count": self.count, "read": sum(1 for b in self.seen if b), "new": self.new, "unread": len(self.unread),
+        res = {"ok": True, "done": bool(done), "count": self.count, "read": sum(1 for b in self.seen if b), "new": self.new, "unread": len(self.unread),
                "named": st["named"], "split": st["split"], "library": st["total"], "taps": self.taps, "seconds": round(time.time() - t0, 1)}
         self.log.event("done", **res)
         return res

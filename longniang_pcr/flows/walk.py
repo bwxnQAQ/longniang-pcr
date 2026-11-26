@@ -422,6 +422,7 @@ class Walk:
         self.resume = bool(resume)
         self.took_over = False                       # 这一局是接手的（出发前的通行证数字、前面走过的格子都没看到）
         self.resume_said = False
+        self.own_said = False                        # “还没扫描过角色，分不出哪些是自己的”这句话说过了（一局说一次）
         self.mid_area = False                        # 接手以后还没看过图：第一次看图是从区域中途看起的
         self.pass_block: str | None = None           # 勾了接着打时：通行证不够出发的那句话先留着，点了「出发」真到了公会选择页（没有进行中的一局）再停
         self.want_retreat = False
@@ -853,9 +854,14 @@ class Walk:
                     idx = ST.choose_start([(c.role, c.attr) for c in cards], names=names, tags=[self.chars.tags(x) for x in names],
                                           atks=[self.chars.atk(x) for x in names], bases=[CH.base_of(x) if x else None for x in names],
                                           funcs=[self.chars.role_as(x) for x in names], aids=[self.chars.aid(x) for x in names],
-                                          powers=[self.chars.power(x) for x in names])
+                                          powers=[self.chars.power(x) for x in names], owned=[self.chars.owns(x) for x in names])
                     r.log.say("      开局 3 人按规则挑（当成一支 3 个人的快攻队：输出、破防、强化、增益优先，强的先拿，坦克和治疗排最后；"
                               "物理和魔法不混，同一个角色不重复拿）：" + "、".join(shown(i) for i in idx))
+                    lent0 = [names[i] for i in range(len(names)) if self.chars.owns(names[i]) is False]
+                    if lent0:
+                        took = [names[i] for i in idx if self.chars.owns(names[i]) is False]
+                        r.log.say(f"      （名单上有 {len(lent0)} 个不是你自己的角色，练度低，排在自己有的后面"
+                                  + (f"；自己有的凑不齐，这次还是拿了 {'、'.join(took)}。）" if took else "，这次没拿。）"))
                 self.pick_auto = [cards[i].index for i in idx]
                 r.log.event("start_pick", cards=[[c.index, c.role, c.attr] for c in cards], names=names, pick=self.pick_auto, by="name" if by_name else "rule")
                 for i in idx:
@@ -1609,7 +1615,7 @@ class Walk:
                                      func=self.chars.role_as(name), aid=self.chars.aid(name), power=self.chars.power(name),
                                      heal=self.chars.heal(name), tough=self.chars.tough(name), pvp=self.chars.is_pvp(name),
                                      tough_p=self.chars.tough_vs(name, "phys"), tough_m=self.chars.tough_vs(name, "magic"),
-                                     effective=any(CD.same_card(c.fp, e) >= CD.FP_SAME for e in eff)))
+                                     effective=any(CD.same_card(c.fp, e) >= CD.FP_SAME for e in eff), owned=self.chars.owns(name)))
                 if name and not self.chars.knows(name):
                     self.no_info.add(name)
             if not is_boss:
@@ -1664,7 +1670,8 @@ class Walk:
                 mark = "、".join(([f"强度 {u.power:g}"] if u.power >= 3 else []) + [ST.TAG_CN.get(t, t) for t in sorted(u.tags)]
                                 + ([HIT_CN[u.hit]] if u.hit in HIT_CN and u.kind in ST.DAMAGE else [])
                                 + (["有奶"] if u.heal >= 1 and u.kind != "heal" else [])
-                                + ([f"按{ROLE_NAMES[u.func]}用"] if u.func and u.func != u.role else []))
+                                + ([f"按{ROLE_NAMES[u.func]}用"] if u.func and u.func != u.role else [])
+                                + (["不是你自己的角色"] if u.owned is False else []))
                 mark = mark or ("有效效果" if u.effective else "")
                 return (f"{u.name}[{base}]" if u.name else base) + (f"（{mark}）" if mark else "")
 
@@ -1684,6 +1691,15 @@ class Walk:
             r.log.say(f"      名单 {len(units)} 人。这一场（{KIND_CN.get(self.battle_kind, self.battle_kind)}，{vs}第 {self.attempt + 1} 次打，"
                       f"{PROFILE_CN[plan.profile]}{side_cn}{route}）带：{who}；要换下 {len(plan.drop)} 个、换上 {len(plan.add)} 个。"
                       + (f"名单里认得出名字的有 {named} 个。" if named else ""))
+            lent_all = [u for u in units if u.owned is False]
+            if lent_all:                             # 2026-11-27 用户定的：最优先上玩家自己有的角色（没有的在黎明界也能用，但练度低）
+                lent_in = [u.name for u in plan.team if u.owned is False]
+                r.log.say(f"      名单里有 {len(lent_all)} 个不是你自己的角色（借来的，练度低），最优先上你自己有的："
+                          + ("这一队里一个借来的都没有。" if not lent_in else f"自己有的凑不齐这一队，还是上了 {'、'.join(lent_in)}。"))
+            elif not self.own_said and not self.chars.owned():
+                self.own_said = True
+                r.log.say("      （还没扫描过角色——或者上一次没读完——分不出哪些是你自己的角色、哪些是黎明界借的。"
+                          "在界面「其他」里点「扫描角色」读完一遍以后，编队会最优先上你自己的角色。）")
             if "heal" in (tweak2.get("need") or []):
                 hs = [u for u in plan.team if ST.can_heal(u)]
                 r.log.say("      这一场要带奶：" + ("、".join(f"{u.name or CD.ROLE_CN[u.role]}（{'职能是治疗' if u.kind == 'heal' else f'有 {u.heal:g} 个能给全队回血的技能'}）" for u in hs)
@@ -1760,6 +1776,7 @@ class Walk:
                         stand_in=self.last_front[0] if self.last_front else None, front_lost=(tweak2 or {}).get("front_lost"),
                         had=list(self.last_had), swapped=swapped, pack=bool((tweak2 or {}).get("pack")), pvp=[u.name for u in plan.team if u.pvp],
                         spread=gap2 or None, crowd=near2, need_hit=(tweak2 or {}).get("need_hit"),
+                        lent=[u.name for u in plan.team if u.owned is False], lent_all=len(lent_all),
                         proven=[self.run_wins.get(u.name or "", 0) for u in plan.team], selfharm=[u.name for u in plan.team if "selfharm" in u.tags],
                         tough=[u.tough for u in plan.team], hit_zone=dict(hits2) if hits2 else None,
                         tough_vs=[ST.tough_vs(u, hits2.get("type")) for u in plan.team] if hits2 else None,
@@ -2041,7 +2058,10 @@ class Walk:
         mods = self._mods()
         cache: dict = {}
         try:
-            got = adv.search(known, stage, mods, seeds, lost=lost, wins=self.run_wins, cache=cache)
+            # 玩家自己没有的角色（借来的，练度低）：推演是把她当满练度算的，所以先扣——最优先上自己有的（一队里起码的输出位不够时除外）
+            own_n = ST.own_dealers(known)
+            own_fit = (lambda team: AD.OFF_OWN * ST.unowned_cost(team, own_n)) if any(u.owned is False for u in known) else None
+            got = adv.search(known, stage, mods, seeds, lost=lost, wins=self.run_wins, fit=own_fit, cache=cache)
         except Exception as e:  # noqa: BLE001
             self.r.log.say(f"      战斗估算出错了（{type(e).__name__}: {e}），这一场照规则排的队上。")
             return None
@@ -2066,7 +2086,8 @@ class Walk:
                         fast = False
                 guide.update(mode="burst" if fast else "mech", real_x=real_x, no_burst=bool(tweak.get("no_burst")))
                 if not fast:
-                    fit = lambda team: AD.OFF_GUIDE * sum(n for _, n in ST.guide_gaps(team, facts, tweak))      # noqa: E731
+                    fit = lambda team: (AD.OFF_GUIDE * sum(n for _, n in ST.guide_gaps(team, facts, tweak))      # noqa: E731
+                                        + (own_fit(team) if own_fit is not None else 0.0))
                     try:
                         again = adv.search(known, stage, mods, [list(plan.team)] + variants({**base, "strict": True}, (None,)) + seeds,
                                            lost=lost, wins=self.run_wins, fit=fit, cache=cache, budget=AD.GUIDE_BUDGET)
@@ -2472,10 +2493,11 @@ class Walk:
             pick, why = ST.choose_recruit([(r, c.attr) for r, c in zip(roles, cards)], self.roster, tags=[self.chars.tags(n) for n in names],
                                           atks=sides, side=self.recruit_side, wants=wants,
                                           powers=[1.0 if self.chars.is_pvp(n) else self.chars.power(n) for n in names],     # 纯竞技场用的角色：招募时按最低强度算
-                                          heals=[self.chars.heal(n) for n in names])
+                                          heals=[self.chars.heal(n) for n in names], owned=[self.chars.owns(n) for n in names])
             label = f"选择第 {pick + 1} 个（{show[pick]}，{why}；三个是 {'、'.join(show)}）"
             r.log.event("recruit", cards=[[c.role, c.attr] for c in cards], names=names, pick=pick, roster=dict(self.roster),
-                        atks=[self.chars.atk(n) for n in names], side=self.recruit_side, power=[self.chars.power(n) for n in names], wants=wants)
+                        atks=[self.chars.atk(n) for n in names], side=self.recruit_side, power=[self.chars.power(n) for n in names], wants=wants,
+                        owned=[self.chars.owns(n) for n in names])
             after = ("role", roles[pick], names[pick], cards[pick].attr)
         else:
             marks = CD.mark_attrs(r.book, s.img)

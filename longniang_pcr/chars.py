@@ -28,6 +28,7 @@ from . import damage as DM
 
 VERSION = 2                  # 头像库文件的格式。1（2026-11-17 晚之前）把「读角色」读到的本名直接当全名记，几个版本的头像混在一个名字下面，作废
 SAME = 0.85                  # 指纹相似度到这个数算同一张头像（同一个角色 ≥0.93，不同角色 ≤0.80）
+UNREAD_OK = 5             # 「读角色」里名字没读出来的头像不超过这么多张：照样敢说“这个角色玩家没有”；再多就说不准了
 SAME_SIGHT = 0.88            # 「读角色」两次看到的是不是同一张头像（都是游戏里的原图，卡得严一点）
 FACE_SURE = 0.90             # 没有名字线索、只凭资料站的头像认人，要到这个数、并且明显比第二像的高
 MAX_FPS = 8                  # 一个角色最多存几张指纹（换过头像的几种样子，加上小头像、大头像、名单里的卡片之间的细微差别）
@@ -154,6 +155,9 @@ class CharBook:
         # 存的是读到的字本身：名单更新以后（新角色、我抄漏的名字）重新对一遍就行，不用再去游戏里读
         self.sightings: list[dict[str, Any]] = []
         self.roster: dict[str, dict[str, Any]] = {}   # 「读角色」里全名已经定下来的：全名 → {职能, 属性}（从 sightings 算出来的，不单独存）
+        self.loose: set[str] = set()                  # 「读角色」里只读到本名、还分不出是哪个版本的那些本名（这些本名的角色有没有，说不准）
+        self.unread_n = 0                             # 「读角色」里名字没读出来、头像也认不出的有几张
+        self.scan: dict[str, Any] = {}                # 上一次「读角色」读完了没有：{"done": 读完一圈了吗, "count": 读了几个}；老的库里没有这一条（当成读完了）
         self.stats: dict[str, dict[str, float]] = {}  # 名字 → {"n": 普通战场数, "sec": 总秒数, "win":…, "lose":…}
         self.error = ""
         self.reset_note = ""                          # 读到了旧格式的库、清掉重来时，这里写一句话（给界面上说一声）
@@ -187,6 +191,7 @@ class CharBook:
                                            "texts": {str(k): int(v) for k, v in (g.get("texts") or {}).items()}, "fp": fp,
                                            "role": g.get("role"), "attr": g.get("attr"), "name": None, "via": ""})
             self.stats = {str(k): dict(v) for k, v in (d.get("stats") or {}).items()}
+            self.scan = dict(d.get("scan") or {}) if isinstance(d.get("scan"), dict) else {}
             self.resolve_sightings()
         except Exception as e:  # noqa: BLE001  库坏了就当空的重新学，不让流程停下
             self.error = f"{type(e).__name__}: {e}"
@@ -206,7 +211,7 @@ class CharBook:
                  "sightings": [{"base": self.base_of_sighting(g), "name": g.get("name"), "via": g.get("via", ""), "bases": g["bases"],
                                 "texts": g.get("texts", {}), "role": g.get("role"), "attr": g.get("attr"), "fp": _enc(g["fp"])}
                                for g in self.sightings],
-                 "stats": self.stats}
+                 "stats": self.stats, "scan": self.scan}
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
             tmp.replace(self.path)
@@ -344,7 +349,7 @@ class CharBook:
     def resolve_sightings(self) -> dict[str, Any]:
         """把「读角色」看到的每张头像的全名重新定一遍（名单更新了、资料站的头像对上了以后都要重算）。
         返回 {"total", "named", "split"（本名读到了、但有几个版本还分不出来）, "unread"（名字没读出来、头像也还认不出）, "fixed": [(横条上读的, 按头像认的)]}。"""
-        self.roster = {}
+        self.roster, self.loose, self.unread_n = {}, set(), 0
         out: dict[str, Any] = {"total": len(self.sightings), "named": 0, "split": 0, "unread": 0, "fixed": [], "via": {}}
         count: dict[str, int] = {}
         for g in self.sightings:
@@ -362,8 +367,10 @@ class CharBook:
                     out["fixed"].append((base, g["name"]))
             elif base:
                 out["split"] += 1
+                self.loose.add(base)
             else:
                 out["unread"] += 1
+        self.unread_n = out["unread"]
         return out
 
     # ---- 学、认 ----
@@ -567,6 +574,21 @@ class CharBook:
         """账号里有哪些角色（全名）：「读角色」读到并且定下了全名的。没读过（或者读到的太少，不像是读完了）返回空集——那就不知道。"""
         names = set(self.roster)
         return names if len(names) >= 30 else set()
+
+    def owns(self, name: str | None) -> bool | None:
+        """这个角色玩家自己有没有（黎明界里没有的角色也能借来用，但练度低——2026-11-27 用户定的：编队最优先上玩家自己有的）。
+        True = 有（「读角色」读到过）；False = 没有；None = 说不准：名字没认出来、没读过角色（或者上一次没读完）、
+        这个本名在角色页上还有头像没分出是哪个版本、或者有好几张头像的名字根本没读出来。说不准的一律当成有。"""
+        if not name:
+            return None
+        own = self.owned()
+        if not own or self.scan.get("done") is False:
+            return None
+        if name in own:
+            return True
+        if base_of(name) in self.loose or self.unread_n > UNREAD_OK:
+            return None
+        return False
 
     # ---- 战绩 ----
     def record_battle(self, team: list[str], kind: str, seconds: float | None, win: bool) -> None:

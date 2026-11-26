@@ -134,8 +134,9 @@ EVENT_NAMES = {"arena": "斗技场", "lost": "迷路", "box": "箱子", "tablet"
                "picnic": "郊游做料理",                    # 2026-11-24 真机上第一次见：只有一个选项（50% 概率进入下一个事件）
                "picnic2": "郊游做料理（做好了）",          # 做成了：左边收手拿“随机职能的印记 ×2”，右边接着做（50% 概率再进下一个事件）。事件表里定的：收手
                # 2026-11-26 用户发来截图：标题「再较量一次！」，左边“挑战结束”，右边“50% 概率获得阿尔法金币 ×4000 并进入下一个事件”（消耗 2000）。
-               # 对照事件表应该是老虎机赢了第一把以后的第二步（它的第一步国服长什么样还没见过）。用户定的：保持选左边（不花金币）。
-               # 选了左边会弹一个「确认」框“无法获得报酬。”——见主循环里的 dlg_no_reward
+               # 对照事件表应该是老虎机赢了第一把以后的第二步（它的第一步国服长什么样还没见过）。
+               # 18:38 用户说保持选左边；19:28 改主意：押（见 _slot_pick——只押“消耗 2000”这一步、一个事件格里只押一次、金币要够）。
+               # 选了左边会弹一个「确认」框“无法获得报酬。”——见主循环里的 dlg_no_reward；押完以后出什么还没见过
                "slot2": "再较量一次（押金币）",
                "janken": "石头剪刀布"}                    # 2026-11-26 玩家排查包里第一次见：三项一样（赢了 3000 金币、输了 1000），选哪个都行
 EVENT_OPTIONS = {"arena": 2, "lost": 2, "box": 2, "tablet": 3, "guild_office": 2, "venue": 2, "picnic": 1, "picnic2": 2, "slot2": 2, "janken": 3}
@@ -181,6 +182,37 @@ def button_lit(img: np.ndarray, box: NBox) -> bool:
     x, y, w, h = (int(v) for v in box)
     gray = cv2.cvtColor(to_norm(img)[y + 6:y + h - 6, x + 15:x + w - 15], cv2.COLOR_BGR2GRAY)
     return float(gray.mean()) >= 125.0
+
+
+SLOT_DIGIT_COLS = (46, 59)      # “消耗2000”那一块（标记 slot_cost2000）里，第一个数字占的那几列
+SLOT_BET_COST = 2000            # 「再较量一次！」只押这一步（押 2000 赌 4000）；按钮上不是这个数就不押
+PAID_LABEL_Y = 566              # 「选择」两个字的位置：不花金币的按钮在 y≈576；要花金币的按钮下面多一行“消耗 N”，字往上挪到 y≈556
+
+
+def _orange(bgr: np.ndarray) -> np.ndarray:
+    """按钮上那行橙色字（“消耗2000”）的字芯，0/1。"""
+    b, g, r = (bgr[..., i].astype(np.int16) for i in range(3))
+    return ((r > 200) & (g > 120) & (b < 140)).astype(np.uint8)
+
+
+def slot_cost_is_2000(book: Any, img: np.ndarray) -> tuple[bool, float, float]:
+    """「再较量一次！」右边按钮上写的是不是“消耗2000”。返回（是不是, 整块的相似度, 第一个数字的字形重合度）。
+
+    整块比灰度的话“消耗4000”“消耗8000”也有 0.97（六个字里只差一个），分不开；所以整块对上以后，再单独比第一个数字的橙色字芯：
+    同一个“2”重合度是 1.0，换成别的数字只有 0.4 左右。两样都够才算——认错了就是白白多押一次金币，所以宁可不认。"""
+    if "slot_cost2000" not in book.marks or "slot_digit2" not in book.tmpl:
+        return False, 0.0, 0.0
+    whole, (x, y, w, h) = book.find_mark(img, "slot_cost2000")
+    if whole < float(book.marks["slot_cost2000"].get("thr", 0.9)):
+        return False, float(whole), 0.0
+    c0, c1 = SLOT_DIGIT_COLS
+    got = _orange(to_norm(img)[y:y + h, x + c0:x + c1])
+    ref = (book.tmpl["slot_digit2"] > 0).astype(np.uint8)
+    if got.shape != ref.shape:
+        return False, float(whole), 0.0
+    union = int((got | ref).sum())
+    digit = int((got & ref).sum()) / union if union else 0.0
+    return digit >= 0.8, float(whole), digit
 
 
 def choose_button(label_box: tuple[int, int, int, int]) -> NBox:
@@ -263,6 +295,8 @@ class Walk:
         self.reroll = TR.reroll_of(reroll)           # 第一档凹什么：想要 / 不要的首领、事件至少给多少分
         self.ev_before: dict[str, Any] | None = None  # 刚走上一个事件格：走之前地图上的数字（事件完了拿来算这个事件给了多少）
         self.ev_area = 0
+        self.slot_bets = 0                           # 这一个事件格里已经押过几次金币（「再较量一次！」只押一次；走上事件格时清零）
+        self.bet_watch = 0                           # 刚押完：接下来这么多个画面各存一张原图（押完以后出什么还没见过，留着以后补认法）
         self.event_gains: list[float | None] = []    # 这一趟每个事件折成多少分
         # 挂机恢复（2026-11-24）：换日、连接出错以后游戏会退回标题画面，afk.Recovery 负责走回来；这里记“正在往回走”的状态
         self.afk = getattr(runner, "recovery", None)
@@ -957,6 +991,7 @@ class Walk:
             self.moves.append(kind)
             if kind == "event":                      # 事件完了以后回到地图，拿前后的数字算这个事件给了多少
                 self.ev_before, self.ev_area = dict(self.hud), self.area
+                self.slot_bets, self.bet_watch = 0, 0
             self.attempt, self.boss_extra = 0, 0
             self.enemy, self.tweak, self.enemy_done, self.enemy_tries = None, None, False, 0
             self.weak = None
@@ -2498,10 +2533,34 @@ class Walk:
                 return idx + 1, f"{ROLE_NAMES[sides[0]]} / {ROLE_NAMES[sides[1]]} 里选{ROLE_NAMES[want]}"
         return None
 
+    def _slot_pick(self, s: Seen) -> tuple[int, str]:
+        """「再较量一次！」选哪边。用户 2026-11-26 19:28 定的：押。只押“消耗 2000 赌 4000”这一步、一个事件格里只押一次，
+        而且手里的金币够；别的情况（已经押过、按钮上不是 2000、金币不够或者没读出来）都选左边“挑战结束”。"""
+        ok, whole, digit = slot_cost_is_2000(self.r.book, s.img)
+        coins = self.hud.get("coins")
+        if self.slot_bets >= 1:
+            return 1, "这个事件里已经押过一次了，到这里收手"
+        if not ok:
+            return 1, f"右边按钮上不是“消耗 {SLOT_BET_COST}”（整块 {whole:.2f}、首位 {digit:.2f}）——只押 {SLOT_BET_COST} 这一步，收手"
+        if coins is None or coins < SLOT_BET_COST:
+            return 1, ("金币没读出来" if coins is None else f"金币只有 {coins:,}") + f"，不够押 {SLOT_BET_COST}，收手"
+        return 2, f"押 {SLOT_BET_COST} 金币赌 4000（手里有 {coins:,}；只押这一次）"
+
     def _on_event(self, s: Seen) -> None:
         r = self.r
         key, score, _ = r.book.classify(s.img, EVENT_KEYS)
         btns = r.book.find_all(s.img, "btn_choose")
+        if key is None and self.slot_bets >= 1 and len(btns) >= 2:
+            # 押完金币以后接着出来的事件，标题没见过：有不花金币的选项（按钮上没有“消耗 N”那一行）就选它——到这里收手，不再押。
+            # 截图留底，以后照着它补上正式的认法
+            free = [i for i, (_sc, b) in enumerate(btns) if b[1] >= PAID_LABEL_Y]
+            if free and len(free) < len(btns):
+                pick = free[0] + 1
+                r.log.shot(s.img, "event_unsure_after_bet", png=True)
+                r.log.event("event", id="after_bet", options=len(btns), pick=pick, score=round(score, 3), free=[i + 1 for i in free])
+                r.log.say(f"      押完以后接着出来的事件标题我还没见过：第 {pick} 项不花金币，选它收手（不再押）；截图已经留下。")
+                self._tap_wait(s, choose_button(btns[pick - 1][1]), f"选择（押完以后的事件，选不花金币的第 {pick} 项）", think=True)
+                return
         if key is None:
             r.log.event("event_unknown", score=round(score, 3), options=len(btns))
             self._unsure_event(s, btns, "这个事件我还没见过")
@@ -2519,6 +2578,15 @@ class Walk:
                 self._unsure_event(s, btns, "事件「公会管理协会」这一组职能我还没见过")
                 return
             self._tap_wait(s, choose_button(btns[got[0] - 1][1]), f"事件「公会管理协会」：{got[1]}（第 {got[0]} 项）", think=True)
+            return
+        if ev == "slot2":
+            pick, why = self._slot_pick(s)
+            r.log.event("event", id=ev, options=len(btns), pick=pick, why=why, coins=self.hud.get("coins"), bets=self.slot_bets)
+            if pick == 2:
+                r.log.shot(s.img, "event_bet", png=True)
+            if self._tap_wait(s, choose_button(btns[pick - 1][1]), f"事件「再较量一次」：{why}（第 {pick} 项）", think=True) != "changed" and pick == 2:
+                self.slot_bets += 1
+                self.bet_watch = 8
             return
         pick = self.event_defaults.get(ev, 1)
         r.log.event("event", id=ev, options=len(btns), pick=pick)
@@ -2548,6 +2616,7 @@ class Walk:
     def _loop(self, t_start: float) -> dict[str, Any]:
         r = self.r
         last, same = "", 0
+        last_bet_page = ""
         while True:
             s: Seen = r.observe()
             page = s.page
@@ -2557,6 +2626,15 @@ class Walk:
             if same > SAME_LIMIT.get(page, SAME_DEFAULT):
                 r.log.shot(s.img, f"stuck_{page}", png=True)
                 raise Halt(f"在「{s.res.name}」上点了 {same - 1} 次画面都没变（按钮可能是灰的，或者这个页面我处理得不对），停下")
+            if self.bet_watch > 0:                   # 刚押过金币：后面出什么画面还没见过，各存一张原图（回到地图为止）
+                if page == "map":
+                    self.bet_watch = 0
+                elif page != last_bet_page:
+                    self.bet_watch -= 1
+                    last_bet_page = page
+                    r.log.shot(s.img, f"unsure_after_bet_{page}", png=True)
+            else:
+                last_bet_page = ""
             if page != "win":
                 self.win_wait = 0
             if page != "dlg_join":

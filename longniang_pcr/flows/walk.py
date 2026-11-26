@@ -266,7 +266,8 @@ class Walk:
                  damage: "DM.DamageBook | None" = None, damage_report: bool = True, adopt: bool = False,
                  tier: "TR.Tier | int | None" = None, reroll: dict | None = None, loot: "LT.LootBook | None" = None,
                  wins: "WN.WinBook | None" = None, keep_passes: int = 0,
-                 auto_equip: bool = True, settle_score: int = 0, settle_spend: bool = False, final_stop: bool = False):
+                 auto_equip: bool = True, settle_score: int = 0, settle_spend: bool = False, final_stop: bool = False,
+                 resume: bool = False):
         self.r = runner
         # 2026-11-24 晚用户要的三个开关：
         self.auto_equip = bool(auto_equip)           # 队伍换过人以后点「特别装备」→「自动装备」。关了就不碰装备（你自己配好的不会被换掉）
@@ -361,6 +362,7 @@ class Walk:
         self.boss_extra = 0                          # 首领战输过以后多编几队
         self.weak: str | None = None                 # 这一场敌人的弱点属性
         self.counters: dict[str, Any] = dict((counters or {}).get("enemies") or {})     # 对策表：敌人名字 → 攻略里的对策
+        self.unseen_group: dict[str, Any] = dict((counters or {}).get("unseen_group") or {})   # 极难格子里一排敌人、认不出是哪一组时用的对策（要范围输出）
         self.enemy: str | None = None                # 这一场认出来的敌人（对策表里的名字）
         self.tweak: dict[str, Any] | None = None     # 对策表里这个敌人的那一条
         self.enemy_done, self.enemy_tries = False, 0
@@ -414,6 +416,14 @@ class Walk:
         self.departed = self.seen_confirm = self.seen_pick3 = self.ended = False
         if adopt:                                    # 接手：游戏已经停在公会选择页上了（上一局在换日时没了），当成已经点过「出发」
             self.departed = True
+        # 接着打进行中的一局（2026-11-27 用户要的“从中途打”）：开始前勾了才有。游戏里有一局打到一半时，点「出发」会直接回到那一局的地图——
+        # 没勾：照旧停下，不动它；勾了：从地图接手，后面和工具自己开的局一样走。只有地图能接（地图上看得到区域、数字和能走的格子，
+        # 路线是从现在站的地方往后排的）；停在战斗准备上可以先点「查看地图」回去，别的页面（编队、战斗中、事件……）前面发生了什么不知道，不接。
+        self.resume = bool(resume)
+        self.took_over = False                       # 这一局是接手的（出发前的通行证数字、前面走过的格子都没看到）
+        self.resume_said = False
+        self.mid_area = False                        # 接手以后还没看过图：第一次看图是从区域中途看起的
+        self.pass_block: str | None = None           # 勾了接着打时：通行证不够出发的那句话先留着，点了「出发」真到了公会选择页（没有进行中的一局）再停
         self.want_retreat = False
         self.why_retreat = ""
         self.moves: list[str] = []                   # 走过的格子类型
@@ -627,12 +637,17 @@ class Walk:
 
     def _do_survey(self, s: Seen, rc: list[TL.Tile]) -> None:
         r = self.r
-        sv = Survey(r, self.area, self.edge_thr)
+        mid = self.took_over and self.mid_area      # 接手的一局、第一次看图：是从这个区域的中途开始看的
+        sv = Survey(r, self.area, self.edge_thr, mid=True) if mid else Survey(r, self.area, self.edge_thr)
         m = sv.run(s)
         if m is None:                                # 拖的中途画面变了：回主循环重新看
             return
         self.area_map = m
-        r.log.say(f"      区域 {self.area} 一共 {m.last} 列：")
+        self.mid_area = False
+        if mid:
+            r.log.say(f"      区域 {self.area} 从现在站的地方往后还有 {m.last} 列（下面的“第 1 列”是你现在这格的下一列）：")
+        else:
+            r.log.say(f"      区域 {self.area} 一共 {m.last} 列：")
         for line in m.describe(self.edge_thr):
             r.log.say("        " + line)
         plan = make_plan(m, 1, sorted(t.ly for t in rc), self.edge_thr, self._route_values(), self.tier.extreme)
@@ -859,10 +874,35 @@ class Walk:
         r.tap(s, cells[want].tap_box, f"开局第 {n + 1} 人：名单第 {want + 1} 格", think=True)
         r.pause(self.beat)
 
+    def _take_over(self, s: Seen) -> None:
+        """从地图接手进行中的一局（开始前勾了「接着打进行中的一局」才会来）。之后和工具自己开的局一样走：
+        区域按地图上的数字、路线从现在站的地方往后排、名单进了队伍编组再认；凹度档位的规矩也照旧（该撤退重开时会撤退）。
+        最终首领还是只有勾了「使用门票」才打。"""
+        r = self.r
+        how = "点了「出发」直接回到了一局的地图" if self.departed else "游戏已经停在一局的地图上"
+        self.departed = self.seen_confirm = self.seen_pick3 = True
+        self.took_over, self.pass_unsure, self.pass_block = True, True, None
+        self.mid_area = True
+        if self.passes is not None:                  # 迷宫首页上读到的是这一局扣过以后的数：按出发前的算（留几张门票的规矩才对得上）
+            self.passes += 1
+        self.fighting = self.arriving = False
+        self.pending, self.tb = None, None
+        self.map_idle = self.arrive_wait = 0
+        r.log.shot(s.img, "takeover", png=True)
+        r.log.say(f"      {how}：有一局正在进行中。这一次勾了「接着打进行中的一局」，从这里接手——")
+        r.log.say("      · 后面和工具自己开的局一样走，凹度档位的规矩也一样：该撤退重开的时候会撤退，这一局就没了；")
+        r.log.say("      · 前面走过的格子、打过的战斗我没看到：区域按地图上的数字来，名单进了队伍编组再认，估分只按地图上现在的数字算；")
+        r.log.say("      · 最终首领还是只有勾了「使用门票」才打，没勾就停在它跟前。")
+        r.log.event("takeover", how=how, passes=self.passes)
+
     def _on_map(self, s: Seen) -> None:
         r = self.r
         if not self.seen_confirm:
-            raise Halt("点了出发就直接到了地图，说明有一局正在进行中。这个流程最后会撤退，不会替你动这一局，停下")
+            if not self.resume:
+                raise Halt("点了出发就直接到了地图，说明有一局正在进行中。这一次没有勾「接着打进行中的一局」，所以不动它，停下"
+                           "（想让工具从这里接着打：开始前勾上那一项；命令行是加 --resume）")
+            self._take_over(s)
+            return                                   # 回主循环重新看一眼地图，照常往下走
         if self.ended:
             r.wait_leave(s.page, 20.0 * self.patience)
             return
@@ -1589,6 +1629,8 @@ class Walk:
             profile, tweak2, avoid, why_retry = ST.plan_retry(self.battle_kind, self.tries, tweak)
             if self.run_wins:
                 tweak2["proven"] = dict(self.run_wins)
+            if self.battle_kind == "extreme" and self.tweak:      # 2026-11-27 用户定的：极难关按攻略来（和攻略点名的要求每差一个都重扣；名单里做不到的不算）
+                tweak2["strict"] = True
             plan, swapped = ST.choose_new_team(units, self.battle_kind, self.weak, self.attempt, lost=[t.get("team") or [] for t in self.tries],
                                                tweak=tweak2, side=side, targets=self.targets, profile=profile, avoid=avoid)
             if swapped:
@@ -1673,6 +1715,13 @@ class Walk:
                 ps = sorted(u.pos for u in plan.team)
                 r.log.say(f"      这一关要站位集中（攻略：伤害看最前面的人和其他人离得多远）：这一队站位 {ps[0]}～{ps[-1]}，"
                           f"最前面的人和第二个人差 {ps[1] - ps[0] if len(ps) > 1 else 0}。")
+            gap2 = float((tweak2 or {}).get("spread") or 0.0)
+            near2 = ST.crowd(plan.team, gap2) if gap2 > 0 else None
+            if gap2 > 0 and len(known_pos) == len(plan.team) and plan.team:
+                ps = sorted(plan.team, key=lambda u: u.pos)
+                r.log.say(f"      这一关要把站位拉开（攻略：一个人站最前面，其余的都放后排；它的大招打最前面的人和她周围）：最前面是 {ps[0].name}（站位 {ps[0].pos}），"
+                          f"其余的人站位 {'、'.join(str(u.pos) for u in ps[1:])}"
+                          + ("，都离她 %g 以上。" % gap2 if not near2 else f"；名单里凑不出四个离得够远的人，还有 {near2} 个人站在离她 {gap2:g} 以内。"))
             if plan.profile != "fast" and len(known_pos) == len(plan.team) and plan.team:
                 fr = min(plan.team, key=lambda u: u.pos)
                 if "selfharm" in fr.tags:
@@ -1710,6 +1759,7 @@ class Walk:
                         concept=plan.concept, heals=[u.heal for u in plan.team], mech=bool((tweak2 or {}).get("mech")),
                         stand_in=self.last_front[0] if self.last_front else None, front_lost=(tweak2 or {}).get("front_lost"),
                         had=list(self.last_had), swapped=swapped, pack=bool((tweak2 or {}).get("pack")), pvp=[u.name for u in plan.team if u.pvp],
+                        spread=gap2 or None, crowd=near2, need_hit=(tweak2 or {}).get("need_hit"),
                         proven=[self.run_wins.get(u.name or "", 0) for u in plan.team], selfharm=[u.name for u in plan.team if "selfharm" in u.tags],
                         tough=[u.tough for u in plan.team], hit_zone=dict(hits2) if hits2 else None,
                         tough_vs=[ST.tough_vs(u, hits2.get("type")) for u in plan.team] if hits2 else None,
@@ -1922,6 +1972,15 @@ class Walk:
             r.log.shot(s.img, "enemy_unknown", png=True)
             seen = f"读到的字是“{got['text']}”" if got["text"] else "名字没读出来"
             r.log.say(f"      这个敌人（{kind}）不在对策表里（{seen}），按默认的全输出打法编队（输了再换稳妥的）。画面已存下来，之后补进对策表。")
+        elif self.battle_kind == "extreme" and self.unseen_group:
+            # 极难格子里的一排敌人 = 六组“装置 + 几个角色”里的一组。认得出的四组上面已经认了；剩下没见过画面的两组（回复装置、炸弹装置）
+            # 攻略都点名要范围输出，所以认不出来时按“要范围输出”排，不再用什么都不管的默认打法（2026-11-27：玩家在区域 5 遇到带回复的那一组，
+            # 工具上了一队打单体的，打到时间到）
+            self.tweak = dict(self.unseen_group)
+            self.targets = self.tweak.get("targets") or self.targets
+            r.log.shot(s.img, "enemy_lineup")
+            r.log.say(f"      这一场（{kind}）是一组敌人，页面上没有名字，画面也对不上认得的那几组。还没见过画面的两组（回复装置、炸弹装置）"
+                      "攻略都点名要范围输出：按“要范围输出”编队（会打一群的输出至少带 3 个，名单里没那么多就有几个带几个）。画面已存下来。")
         else:
             r.log.shot(s.img, "enemy_lineup")
             r.log.say(f"      这一场（{kind}）是一组敌人，页面上没有名字，认不出是哪一组，按默认的全输出打法编队（输了再换稳妥的）。")
@@ -1962,25 +2021,61 @@ class Walk:
         if len(known) < 5 or len(plan.team) != 5:
             return None
         seeds: list[list[ST.Unit]] = [list(plan.team)]
-        base = {k: v for k, v in (tweak or {}).items() if k not in ("need", "always", "heal_min", "heals")}
-        for need in ([], ["tank"], ["heal"], ["tank", "heal"]):
-            for sd in (None, "phys", "magic"):
-                try:
-                    p = ST.choose_team(known, self.battle_kind, self.weak, 1, tweak={**base, "need": list(need)}, side=sd, targets=self.targets,
-                                       profile="burst", avoid=avoid)
-                except Exception:  # noqa: BLE001
-                    continue
-                if len(p.team) == 5:
-                    seeds.append(list(p.team))
+        base = {k: v for k, v in (tweak or {}).items() if k not in ("need", "always", "heal_min", "heals", "strict", "_facts")}
+
+        def variants(tw: dict[str, Any], sides: tuple) -> list[list[ST.Unit]]:
+            out = []
+            for need in ([], ["tank"], ["heal"], ["tank", "heal"]):
+                for sd in sides:
+                    try:
+                        p = ST.choose_team(known, self.battle_kind, self.weak, 1, tweak={**tw, "need": list(need)}, side=sd, targets=self.targets,
+                                           profile="burst", avoid=avoid)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if len(p.team) == 5:
+                        out.append(list(p.team))
+            return out
+
+        seeds += variants(base, (None, "phys", "magic"))
         lost = [t.get("team") or [] for t in self.tries] + (self.wins.lost(self.enemy) if self.wins is not None else [])
         mods = self._mods()
+        cache: dict = {}
         try:
-            got = adv.search(known, stage, mods, seeds, lost=lost, wins=self.run_wins)
+            got = adv.search(known, stage, mods, seeds, lost=lost, wins=self.run_wins, cache=cache)
         except Exception as e:  # noqa: BLE001
             self.r.log.say(f"      战斗估算出错了（{type(e).__name__}: {e}），这一场照规则排的队上。")
             return None
         if got is None:
             return None
+        # 极难关按攻略来（2026-11-27 用户定的两句：“把所有极难关按攻略优化一下”“秒不掉 boss 的情况就走机制”）：
+        # 推演最好的那一队合攻略点名的要求 → 就上它；不合 → 秒得掉（按真机用时折算，敌人放大招之前就打完）就不管机制，秒不掉就在合攻略的队里重新挑
+        guide: dict[str, Any] | None = None
+        free = got
+        if self.battle_kind == "extreme" and tweak:
+            facts = ST.roster_facts(known, tweak)
+            gaps = ST.guide_gaps(got["team"], facts, tweak)
+            guide = {"mode": "fits", "gaps": [g for g, _ in gaps]}
+            if gaps:
+                own = self.wins.est_factor(self.enemy) if self.wins is not None else None
+                real_x = max(float(tweak.get("real_x") or AD.REAL_X), float(own[0]) if own else 0.0)
+                fast = False
+                if not tweak.get("no_burst"):
+                    try:
+                        fast, _bn, _bp = adv.burstable([u.name for u in got["team"]], stage, mods, real_x)
+                    except Exception:  # noqa: BLE001
+                        fast = False
+                guide.update(mode="burst" if fast else "mech", real_x=real_x, no_burst=bool(tweak.get("no_burst")))
+                if not fast:
+                    fit = lambda team: AD.OFF_GUIDE * sum(n for _, n in ST.guide_gaps(team, facts, tweak))      # noqa: E731
+                    try:
+                        again = adv.search(known, stage, mods, [list(plan.team)] + variants({**base, "strict": True}, (None,)) + seeds,
+                                           lost=lost, wins=self.run_wins, fit=fit, cache=cache, budget=AD.GUIDE_BUDGET)
+                    except Exception:  # noqa: BLE001
+                        again = None
+                    if again is not None:
+                        got = again
+                        got["tried"] = len(cache)
+                    guide["left"] = [g for g, _ in ST.guide_gaps(got["team"], facts, tweak)]
         rule = [u.name for u in plan.team]
         pick = [u.name for u in sorted(got["team"], key=lambda z: z.order)]
         rule_res = None
@@ -1991,11 +2086,23 @@ class Walk:
         lines = [f"      战斗估算（按技能数值推演，不是真打；推演了 {got['tried']} 队；秒是游戏计时器走的秒，不是现实时间）："]
         if rule_res is not None:
             lines.append(f"        原来规则会排的队 {'、'.join(rule)}：{AD.say(rule_res[0])}；往坏里估（敌人再疼四成、我方输出打七五折）：{AD.say(rule_res[1])}。")
-        if same:
+        front_of = lambda team: min(team, key=lambda z: z.pos if z.pos is not None else 9999).name      # noqa: E731
+        if guide is not None and guide["mode"] == "mech":
+            fnames = [u.name for u in sorted(free["team"], key=lambda z: z.order)]
+            lines.append(f"        只看推演的话最快的是 {'、'.join(fnames)}（{AD.say(free['nom'])}），但它不合攻略点名的打法：{'；'.join(guide['gaps'])}。")
+            lines.append("        " + ("这一关的机制从开打就起作用（或者推演没在真机上核过），不看秒不秒得掉" if guide["no_burst"]
+                                     else f"按真机的用时折算（这个敌人真机上大约是推演的 {guide['real_x']:g} 倍），它放大招之前打不完，秒不掉") + "：按攻略的机制来。")
+            lines.append(f"        合攻略的队里推演最好的是 {'、'.join(pick)}（最前面 {front_of(got['team'])}）：{AD.say(got['nom'])}；往坏里估：{AD.say(got['pes'])}。"
+                         + ("就是规则排的那一队。" if same else "上这一队。"))
+            if guide.get("left"):
+                lines.append(f"        （名单里凑不齐攻略的全部要求，这一队还差：{'；'.join(guide['left'])}。）")
+        elif same:
             lines.append("        在名单里换人推演下来没有比它更好的，就上这一队。")
         else:
-            front = min(got["team"], key=lambda z: z.pos if z.pos is not None else 9999)
-            lines.append(f"        估算最好的是 {'、'.join(pick)}（最前面 {front.name}）：{AD.say(got['nom'])}；往坏里估：{AD.say(got['pes'])}。上这一队。")
+            lines.append(f"        估算最好的是 {'、'.join(pick)}（最前面 {front_of(got['team'])}）：{AD.say(got['nom'])}；往坏里估：{AD.say(got['pes'])}。上这一队。")
+        if guide is not None and guide["mode"] == "burst":
+            lines.append(f"        这一队不合攻略点名的打法（{'；'.join(guide['gaps'])}），但按真机的用时折算（大约是推演的 {guide['real_x']:g} 倍）"
+                         "它放大招之前就打得完、没人倒：秒得掉，不用管机制。")
         # 估算准不准，拿真机上的记录核一下：这个敌人以前实际用时是估算的几倍；乘上去超过 90 秒，就是“估算说能打完、真机上打不完”
         distrust = None
         fac = self.wins.est_factor(self.enemy) if self.wins is not None else None
@@ -2009,13 +2116,15 @@ class Walk:
         elif fac is None and fac_all is not None and got["nom"].win and abs(fac_all[0] - 1.0) >= 0.3:
             lines.append(f"        （以往打赢的 {fac_all[1]} 场里，实际用时是估算的 {fac_all[0]:g} 倍左右，这一队实际大约要 {got['nom'].time * fac_all[0]:.0f} 秒。）")
         skipped = sorted(set(got["nom"].skipped) | set(got["pes"].skipped))
+        if guide is not None and guide["mode"] != "fits":
+            guide["free"] = [u.name for u in sorted(free["team"], key=lambda z: z.order)]
         if distrust is not None:
             event = {"stage": stage, "pick": rule, "nom": AD.brief(got["nom"]), "pes": AD.brief(got["pes"]), "tried": got["tried"], "distrust": distrust,
-                     "rule_nom": AD.brief(rule_res[0]) if rule_res else None, "rule_pes": AD.brief(rule_res[1]) if rule_res else None, "skipped": skipped,
+                     "rule_nom": AD.brief(rule_res[0]) if rule_res else None, "rule_pes": AD.brief(rule_res[1]) if rule_res else None, "skipped": skipped, "guide": guide,
                      "mods": {k: (round(v, 3) if isinstance(v, (int, float)) else v) for k, v in mods.items()}}
             return {"pick": None, "lines": lines, "event": event}
         event = {"stage": stage, "pick": pick, "nom": AD.brief(got["nom"]), "pes": AD.brief(got["pes"]), "tried": got["tried"], "mods": {k: (round(v, 3) if isinstance(v, (int, float)) else v) for k, v in mods.items()},
-                 "rule_nom": AD.brief(rule_res[0]) if rule_res else None, "rule_pes": AD.brief(rule_res[1]) if rule_res else None, "skipped": skipped}
+                 "rule_nom": AD.brief(rule_res[0]) if rule_res else None, "rule_pes": AD.brief(rule_res[1]) if rule_res else None, "skipped": skipped, "guide": guide}
         return {"pick": None if same else got["team"], "lines": lines, "event": event}
 
     def _remembered(self, units: list[ST.Unit]) -> dict[str, Any] | None:
@@ -2699,7 +2808,7 @@ class Walk:
                            "moves": list(self.moves), "battles": self.battles, "why": str(e), "restart": False,
                            "surveys": self.surveys, "seconds": round(time.time() - t_start, 1),
                            "hud": dict(self.hud), "score_if_cleared": self.final_score, "losses": self.losses, "fights": list(self.fights),
-                           "shops": list(self.shops), "settled": self.settled}
+                           "shops": list(self.shops), "settled": self.settled, "took_over": self.took_over}
             for line in self.damage_lines():
                 r.log.say(line)
             r.log.event("done", **self.result)
@@ -2777,7 +2886,7 @@ class Walk:
                                    "why": "打完最终首领，已结算" if self.cleared else self.why_retreat, "restart": self.restart,
                                    "surveys": self.surveys, "seconds": round(time.time() - t_start, 1),
                                    "hud": dict(self.hud), "score_if_cleared": self.final_score, "losses": self.losses, "fights": list(self.fights),
-                                   "shops": list(self.shops), "settled": self.settled}
+                                   "shops": list(self.shops), "settled": self.settled, "took_over": self.took_over}
                     for line in self.damage_lines():
                         r.log.say(line)
                     r.log.event("done", **self.result)
@@ -2788,10 +2897,16 @@ class Walk:
                 if self.passes is not None:
                     r.log.say(f"      通行证：{self.passes} 张。")
                     r.log.event("passes", n=self.passes, keep=self.keep_passes, spending=self.boss == "all")
+                    block = None
                     if self.passes <= 0:
-                        raise Halt("通行证是 0 张，出发不了，停下")
-                    if self.boss == "all" and self.passes <= self.keep_passes:
-                        raise Halt(f"通行证只剩 {self.passes} 张，设置里说要留 {self.keep_passes} 张（farm.keep_passes），这一局会用掉 1 张，所以不出发，停下")
+                        block = "通行证是 0 张，出发不了，停下"
+                    elif self.boss == "all" and self.passes <= self.keep_passes:
+                        block = f"通行证只剩 {self.passes} 张，设置里说要留 {self.keep_passes} 张（farm.keep_passes），这一局会用掉 1 张，所以不出发，停下"
+                    if block and not self.resume:
+                        raise Halt(block)
+                    if block:                        # 勾了「接着打进行中的一局」：那一局的通行证早就扣过了，这里的数字不作数。先点「出发」看是不是直接回到那一局
+                        self.pass_block = block
+                        r.log.say("      通行证不够再开一局；先点「出发」看看是不是有进行中的一局（有就接着打，没有就停下）。")
                 if r.tap(s, BOX["lab_home.go"], "出发") != "changed":
                     self.departed = True
                     r.wait_leave(page)
@@ -2806,6 +2921,11 @@ class Walk:
             elif page == "guild_select" and self.rejoin and self.seen_pick3:
                 raise Relap("回到迷宫以后点「出发」到了公会选择页，说明原来那一局已经不在了")
             elif page == "guild_select" and self.departed:
+                if self.pass_block:                  # 没有进行中的一局，通行证又不够开新的
+                    raise Halt("没有进行中的一局可以接着打；" + self.pass_block)
+                if self.resume and not self.took_over and not self.resume_said:
+                    self.resume_said = True
+                    r.log.say("      点了「出发」到了公会选择页：没有进行中的一局，照常开新的一局。")
                 self._on_guild_select(s)
             elif page == "dlg_guild_confirm" and self.departed:
                 if r.tap(s, BOX["guild_confirm.go"], "出发（会先扣 1 张通行证，撤退时退回）") != "changed":
@@ -2929,6 +3049,13 @@ class Walk:
                 if r.tap(s, BOX["end.ok"], "确认（撤退，退回通行证）") != "changed":
                     self.ended = True
                 r.wait_leave(page)
+            elif page == "battle_ready" and self.resume and not self.departed:
+                # 勾了「接着打进行中的一局」，游戏停在这一局的战斗准备上：先回地图，从地图接手（这一格是什么战斗，回头走上去的时候再认）
+                self._tap_wait(s, BOX["ready.map"], "查看地图（接着打进行中的一局：先回地图）")
+            elif self.resume and not self.departed and page not in OUTSIDE:
+                r.log.shot(s.img, f"takeover_{page}", png=True)
+                raise Halt(f"要接着打进行中的一局，得从这一局的地图接手；现在游戏停在「{s.res.name}」上，这一步前面发生了什么我没看到，不敢接。"
+                           "请你把这一步点完、回到地图（或者退回迷宫首页、主页），再开始")
             else:
                 r.log.shot(s.img, f"unexpected_{page}", png=True)
                 raise Halt(f"这一步没想到会出现「{s.res.name}」，停下")

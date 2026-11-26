@@ -41,9 +41,11 @@ STOP_WAIT_S = 15.0        # 退出时让正在跑的功能自己停下，最多�
 OPTIONS: dict[str, list[tuple[str, str, Any, str]]] = {
     # spend = 使用门票（通行证）：不勾就只打一局、停在最终首领跟前；勾了才打最终首领并结算，成功打完才算一局。每次都要重新勾，不记。
     # settle = 分数线（只在勾了门票时有用）：没到分的局撤退重打，不用门票、不算一局
+    # resume = 接着打进行中的一局（2026-11-27）：游戏里有一局打到一半时从地图接手；不勾就照旧停下、不动那一局。每次都要重新勾，不记
     "15": [("tier", "tier", 2, "档位"), ("guild", "select", "", "公会"),
            ("spend", "check", False, "使用门票（不勾选则停在最终boss前）"),
            ("laps", "number", 1, "打几局"), ("settle", "number", 0, "到多少分才结算（0 = 不看分数）"),
+           ("resume", "check", False, "接着打进行中的一局"),
            ("report", "check", False, "每场打完看伤害报告"), ("equip", "check", False, "编完队自动装备特别装备"),
            ("recover", "check", False, "换日 / 掉线后自己走回迷宫"),
            ("boss_want", "text", "", "第一档·只留这些首领（空着不挑）"), ("boss_avoid", "text", "", "第一档·遇到就重开的首领"),
@@ -55,7 +57,7 @@ OPTIONS: dict[str, list[tuple[str, str, Any, str]]] = {
            ("report", "check", False, "每场打完看伤害报告"), ("equip", "check", False, "编完队自动装备特别装备")],
 }
 PREFS_V = 2               # 界面记住的选项是哪一套默认值下面记的（2 = 2026-11-25：开关默认都关、公会默认刷分）。对不上的旧记录不用
-NEVER_REMEMBER = ("spend", "fresh", "start_at", "stop_at")      # 这几个每次都要重新填 / 勾：记住了反而会出意外（比如点开始却等到明天）
+NEVER_REMEMBER = ("spend", "fresh", "start_at", "stop_at", "resume")      # 这几个每次都要重新填 / 勾：记住了反而会出意外（比如点开始却等到明天）
 # 这几个选项的默认值跟着 config/settings.json 走：(选项名, walk 里的键)
 FROM_SETTINGS = (("guild", "guild"), ("tier", "tier"), ("laps", "laps"), ("report", "damage_report"), ("equip", "auto_equip"), ("recover", "recover"))
 GROUPS = (("黎明界迷宫", ("15",)), ("按饰品数量连续刷", ("18",)), ("其他", ("16", "6", "5", "8")))
@@ -108,6 +110,8 @@ def build_cmd(key: str, items: dict[str, tuple], opts: dict[str, Any], python: s
         except (TypeError, ValueError):
             pass
     if key == "15":
+        if opts.get("resume") is True:          # 只有明确勾了才带：不带的话，游戏里有进行中的一局就停下、不动它
+            cmd.append("--resume")
         if opts.get("spend") is True:           # 只有明确勾了「使用门票」才带：不带的话走到最终首领跟前就停，不用门票、只打一局
             cmd.append("--spend")
             if "laps" in opts:
@@ -877,13 +881,14 @@ function drawHero(){
     for (const t of tiers) h += '<div class="tier" data-n="' + t.n + '" onclick="pickTier(' + t.n + ')" title="' + esc(t.blurb) + '"><div class="nm">' + t.n + ' ' + esc(t.short) + '</div></div>';
     h += '</div><div id="tierbl"></div>';
   }
-  const MAIN = ['guild', 'spend', 'laps', 'settle'];          // 常用的摆外面，别的收进「更多选项」
+  const MAIN = ['guild', 'spend', 'laps', 'settle', 'resume'];          // 常用的摆外面，别的收进「更多选项」
   h += '<div class="optrow">' + full.opts.filter(o => MAIN.includes(o.name)).map(o => optHtml(full, o)).join('') + '</div>';
   h += '<div class="gorow gofold"><button class="primary" data-key="15" onclick="run(\'15\')">开始</button>';
   h += '<details class="adv"><summary>更多选项</summary><div class="optrow">' + full.opts.filter(o => !MAIN.includes(o.name)).map(o => optHtml(full, o)).join('') + '</div></details>';
   h += '<details class="adv"><summary>说明</summary><div class="note">' +
        '· 不勾「使用门票」：只打一局。五个区域走到最终首领跟前就停下，任务结束——不撤退、不打最终首领、不用门票。这一局交给你：自己打掉它就结算，不想要就手动撤退。<br>' +
        '· 勾了「使用门票」：打掉最终首领、结算，每成功打完一局用 1 张门票，打满「打几局」那么多局（成功打完才算一局）。「到多少分才结算」填了数的话，没到分的局撤退重打——不用门票、不算一局。这个勾每次都要重新勾。<br>' +
+       '· 「接着打进行中的一局」：游戏里有一局打到一半时（在迷宫首页点「出发」会直接回到地图），不勾的话工具停下、不动它；勾了就从那一局的地图接手往下打，后面和工具自己开的局一样走——档位规定要撤退重开的时候照样会撤退，那一局就没了。开始前把游戏停在迷宫首页或者那一局的地图上。没有进行中的一局时照常开新的。这个勾每次都要重新勾。<br>' +
        '· 「更多选项」里的勾默认都不勾，要哪个勾哪个（勾过的下次还记着）。公会默认是「刷分」：工具自己挑估分最高的公会。<br>' +
        '· 看伤害报告：勾了的话每场打完点开看每个人打了多少（首领战也看；时间到了没打完输的那一场也看），记下来调输出角色的比重、下一次换人。<br>' +
        '· 自动装备：勾了的话编完队点「特别装备」→「自动装备」。你自己配好了装备、不想被换，就别勾。<br>' +
@@ -943,6 +948,8 @@ async function run(key){
   }
   if (key === '15' && opts.spend && !await askBox('注意：这一次会真实使用门票。\n\n勾了「使用门票」：每成功打完一局（打掉最终首领、结算）用 1 张门票，一共打 ' + opts.laps + ' 局，最多用 ' + opts.laps + ' 张。' +
       (opts.settle > 0 ? '\n估分没到 ' + opts.settle + ' 的局会撤退重打，不用门票、不算一局。' : '') + '\n确定开始吗？')) return;
+  if (key === '15' && opts.resume && !await askBox('勾了「接着打进行中的一局」。\n\n游戏里如果有一局打到一半，工具会从那一局的地图接手往下打，后面和它自己开的局一样走：' +
+      '档位规定要撤退重开的时候（极难走不到、一场打了几次都没过……）会把那一局撤退掉。' + (opts.spend ? '' : '\n没勾「使用门票」：走到最终首领跟前就停下，不打它。') + '\n确定开始吗？')) return;
   if (key === '18' && !String(opts.targets || '').trim()){ await tellBox('还没有目标：先在下面「按分类加」里选好属性、部位 / 系列和件数，点「加进目标」。'); return; }
   if (key === '18' && opts.spend && !await askBox('注意：这一次会真实使用门票。\n\n勾了「使用门票」：每打通一局（打掉最终首领、结算）用掉 1 张门票，最多打 ' + opts.max_runs + ' 局。确定开始吗？')) return;
   const r = await api('/api/run', {key, opts});

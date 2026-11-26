@@ -35,6 +35,7 @@ ALL_RANGE = 2160
 AURA = {1: "atk", 2: "pdef", 3: "matk", 4: "mdef", 5: "dodge", 6: "crit", 7: "mcrit", 8: "tpup", 9: "ls", 11: "cdmg", 12: "mcdmg", 13: "acc",
         14: "taken_crit", 15: "taken", 16: "taken_p", 17: "taken_m", 18: "dealt_p", 19: "dealt_m"}
 CC_IMMUNE_BOSS = True
+ENEMY_REACH = 50.0         # 敌人打“某个人和她周围”的技能：范围外再多够得到这么远（真机上 335 打得到、362 打不到，见 _targets）
 
 
 @dataclass
@@ -74,6 +75,8 @@ class Actor:
     hastes: list[list[float]] = field(default_factory=list)   # 技能给的“额外”加速（动作 83）：[加多少, 到期时间, 是哪个动作给的]
     counters: dict[int, int] = field(default_factory=dict)    # 技能计数（动作 45 加一；“第一次放才有的效果”靠它判断）
     marks: dict[int, list[float]] = field(default_factory=dict)   # 特殊标记（动作 35）：标记编号 → [层数, 到期时间]
+    base_max: float = 0.0                             # 原本的最大生命（没被降的时候）
+    hp_downs: list[list[float]] = field(default_factory=list)  # 被降了多少最大生命：[降多少, 到期时间]
     uid: int = 0                                      # 角色编号（“队里有某某时”这种条件要用）
 
     @property
@@ -89,7 +92,10 @@ class Actor:
                     pct += v
                 else:
                     add += v
-        return base * (1 + pct / 100.0) + add
+        val = base * (1 + pct / 100.0) + add
+        # 攻击力被降到 0 以下按 0 算（游戏里不会是负的）。以前没有这一条：带降魔攻的角色打幽灵领主时，推演里它的魔攻成了 -23080，
+        # “按魔攻加成的比例伤害”跟着变成负数，等于它的 UB 完全不疼
+        return max(0.0, val) if key in ("atk", "matk") else val
 
     def mod(self, key: str, t: float) -> float:
         """taken / dealt 这类“百分比修正”的合计（%）。"""
@@ -176,10 +182,13 @@ class Battle:
             self.ours.append(a)
         sg = data.stages[stage]
         e_atk, e_def = self.mods.get("enemy_atk_pct", 0.0), self.mods.get("enemy_def_pct", 0.0)
+        # 敌人的血量乘多少（平时是 1）。判断“秒不秒得掉”时用：真机上的用时是推演的几倍，就把敌人的血乘几倍再推演一遍——
+        # 打得久了，敌人的 TP 照常涨，该放的大招就会放出来。（试过把我方输出除以倍数：有“单下伤害封顶”在，用时并不跟着成倍变长）
+        e_hp = max(0.01, float(self.mods.get("enemy_hp", 1.0) or 1.0))
         rmin = None
         for e in sg["enemies"]:
             eu = data.eunits[str(e["unit"])]
-            st = {"hp": e["hp"], "atk": e["atk"] * (1 + e_atk / 100.0), "matk": e["matk"] * (1 + e_atk / 100.0), "pdef": max(0.0, e["pdef"] * (1 + e_def / 100.0)),
+            st = {"hp": e["hp"] * e_hp, "atk": e["atk"] * (1 + e_atk / 100.0), "matk": e["matk"] * (1 + e_atk / 100.0), "pdef": max(0.0, e["pdef"] * (1 + e_def / 100.0)),
                   "mdef": max(0.0, e["mdef"] * (1 + e_def / 100.0)), "dodge": e.get("dodge", 0), "acc": e.get("acc", 0), "tpup": e.get("tpup", 0)}
             a = Actor(1, e["jp"], int(e["lv"]), st, eu["atk"], float(eu["range"] or 0), float(eu["cast"] or 2.0), eu["pat"], eu["sk"], slv=e["slv"], boss=bool(e.get("boss")))
             if not a.boss:
@@ -188,7 +197,7 @@ class Battle:
         for a in self.foes:
             a.x = 0.0 if a.boss else max(0.0, a.range - (rmin or 0.0))
         for a in self.ours + self.foes:
-            a.max_hp = a.hp = float(a.st["hp"])
+            a.max_hp = a.hp = a.base_max = float(a.st["hp"])
             a.next_code = self._peek(a)
             a.next_time = FIRST_WAIT + (self._cast(a, a.next_code) if FIRST_PLUS_CAST else 0.0)
         for a in self.ours:
@@ -251,7 +260,8 @@ class Battle:
                     inside = [x for x in pool if x.boss or abs(x.x - origin.x) <= rg + 50]
             elif a.side == 1 and ta != 2:
                 front = min(pool, key=lambda z: -z.x) if origin is a else origin
-                inside = [x for x in pool if abs(x.x - front.x) <= rg + 1]
+                # 2026-11-27 拿真机记录核的（幽灵领主的 UB，范围 300）：离最前面的人 335 的被打到了，362、380 的没有——和我方一样按“范围 + 50”算
+                inside = [x for x in pool if abs(x.x - front.x) <= rg + ENEMY_REACH]
             else:
                 inside = [x for x in pool if abs(x.x - origin.x) <= rg + 50]
             pool = inside or ([min(pool, key=lambda z: abs(z.x - origin.x))] if ta != 2 else [])
@@ -455,6 +465,25 @@ class Battle:
             pass
         tgt.buffs.append([kind, -value if down else value, is_pct, self.t + dur])
 
+    def _cut_max(self, x: Actor, amount: float, dur: float) -> None:
+        """把 x 的最大生命降 amount，持续 dur 秒；现在的血超过新的最大生命就压下来。降到见底（剩不到 1）算倒下——
+        真机上幽灵领主的 UB 范围里站了两个以上时，这些人就是这一下一起倒的。"""
+        if not x.alive or amount <= 0 or dur <= 0:
+            return
+        x.hp_downs.append([amount, self.t + dur])
+        self._remax(x)
+        if x.max_hp <= 1.0:
+            x.hp, x.dead_at = 0.0, self.t
+            if x.side == 0:
+                self.deaths.append((x.name, round(self.t, 1)))
+            if self.trace is not None:
+                self.trace.append((round(self.t, 2), "-", x.name, -1.0))
+
+    def _remax(self, x: Actor) -> None:
+        cut = sum(v for v, until in x.hp_downs if until > self.t)
+        x.max_hp = max(1.0, x.base_max - cut)
+        x.hp = min(x.hp, x.max_hp)
+
     def _apply(self, a: Actor, sk: dict[str, Any], code: str) -> None:
         lv = a.level_of(code)
         t = self.t
@@ -473,6 +502,7 @@ class Battle:
         if a.side == 1:
             tp_rate = 0.0 if a.boss else MOB_TP_RATE
         queue = [act for act in acts if act["id"] not in children]
+        raw_dealt = 0.0                              # 这个技能里“按比例掉血”的动作一共打了多少（敌人的；动作 26 的第 6 种量要用）
         by_id = {act["id"]: act for act in acts}
         guard = 0
         while queue and guard < 40:
@@ -523,6 +553,9 @@ class Battle:
                 if a.side == 0 and tg and tg[0].side == 0:
                     value *= 1 + self.mods.get("buff_pct", 0.0) / 100.0
                 for x in tg:
+                    if int(d[0]) == 1 and a.side == 1 and x.side == 0:     # 敌人降我方的最大生命（幽灵领主的 UB）
+                        self._cut_max(x, x.base_max * value / 100.0 if v[0] == 2 else value, dur)
+                        continue
                     self._aura(a, x, int(d[0]), v[0] == 2, value, dur)
             elif ty == 16:
                 amt = v[0] + v[1] * lv
@@ -541,6 +574,8 @@ class Battle:
                 pct = v[0] + v[1] * lv
                 for x in tg:
                     base = x.max_hp if d[0] == 1 else x.hp
+                    if a.side == 1 and x.alive:
+                        raw_dealt += max(0.0, base * pct / 100.0)
                     self._hurt(a, x, base * pct / 100.0 * (self.mods.get("enemy_out", 1.0) if a.side == 1 else 1.0), "magic" if d[1] == 2 else "phys", tp_rate=tp_rate)
             elif ty == 48:
                 power = a.stat("matk" if d[0] == 2 else "atk", t)
@@ -616,6 +651,13 @@ class Battle:
                     val = float(self._mark(x, key - (200 if key < 300 else 2000)))
                 elif key == 2:                         # 已经打倒几个敌人
                     val = float(sum(1 for z in (self.foes if a.side == 0 else self.ours) if not z.alive))
+                elif key == 6:
+                    # 这个技能到这一步一共打出了多少伤害（所有目标加起来）。只在“敌人拿它去降我方最大生命”时算——幽灵领主的 UB：
+                    # 范围里的人各掉一截血，再把范围里每个人的最大生命降掉“这一下的总伤害”。所以范围里只有一个人时她活得下来，
+                    # 站了两个以上就一起倒（2026-11-27 拿 9 场真机记录核的）。别的用法（巨大吞拿鱼的 UB、我方十几个技能）没核过，照旧不算
+                    target = by_id.get(int(d[0]))
+                    if a.side == 1 and target is not None and target["t"] == 10 and int(target["d"][0]) == 1:
+                        val = raw_dealt                # 按没被屏障、减伤抵掉之前的数算：真机上带着屏障的队照样是范围里的人一起倒
                 if val is not None:
                     amount = (v[1] + v[2] * lv) * val
                     cap = v[3] + v[4] * lv                 # 加成有上限（v4 + v5×等级）
@@ -677,6 +719,9 @@ class Battle:
             a.dots = [x for x in a.dots if x[1] > t]
             a.buffs = [x for x in a.buffs if x[3] > t]
             a.barriers = [x for x in a.barriers if x[2] > t and x[1] > 0]
+            if a.hp_downs:
+                a.hp_downs = [x for x in a.hp_downs if x[1] > t]
+                self._remax(a)
             regen = self.mods.get("regen", 0.0)
             if regen and a.side == 0:
                 self._heal(a, a, regen)

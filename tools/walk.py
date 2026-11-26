@@ -6,6 +6,7 @@
 区域 3 的首领会打（打完照样能撤退），最终首领不打。走满 N 格就撤退；N 填 0 = 只看全图、排路线，一格不走。
 区域 1～3 一共 17 格，第 17 格是区域 3 的首领。加 --full = 不限格数，一直走到最终首领跟前（30 格）再撤退。
 开始前请把游戏停在「迷宫首页」（有「出发」按钮的那一页），主页或冒险页也可以。
+游戏里有一局打到一半时：默认停下、不动它；加 --resume（界面上勾「接着打进行中的一局」）就从那一局的地图接手往下打。
 """
 from __future__ import annotations
 
@@ -129,6 +130,8 @@ def main() -> int:
     ap.add_argument("--recover", action="store_true", help="这一次遇到换日 / 掉线自己走回迷宫（设置里默认是停下）")
     ap.add_argument("--no-recover", action="store_true", help="这一次遇到换日 / 掉线就停下，不自己走回迷宫")
     ap.add_argument("--laps", type=int, default=0, help="打几局：成功打完（打掉最终首领、结算）才算一局，要加 --spend；不加 --spend 只打一局（不写就用设置里的 walk.laps，默认 1）")
+    ap.add_argument("--resume", action="store_true", help="接着打进行中的一局：游戏里有一局打到一半时（点「出发」会直接回到地图），从地图接手往下打；"
+                                                          "不加就照旧停下、不动那一局。没有进行中的一局时照常开新的。只管这一次，不会记住")
     ap.add_argument("--equip", action="store_true", help="这一次编完队点「特别装备」→「自动装备」（设置里默认是不点）")
     ap.add_argument("--no-equip", action="store_true", help="这一次不点「特别装备」→「自动装备」（你自己配好的装备不会被换掉）")
     ap.add_argument("--settle", type=int, default=0, help="黎明界迷宫（--full）勾了使用门票（--spend）时：走到最终首领跟前估分达到这个数才打它、结算；"
@@ -216,7 +219,12 @@ def main() -> int:
     else:
         log.say("  走几格再撤退" + mode)
         log.say("  会真的打战斗（AUTO）、选角色和遗物；不在商店买东西；区域 3 的首领会打，最终首领不打。最后撤退，门票不会少。")
-    log.say("  请先把游戏停在「迷宫首页」。")
+    if args.resume:
+        log.say("  请把游戏停在「迷宫首页」，或者直接停在进行中那一局的地图上。")
+        log.say("  这一次勾了「接着打进行中的一局」：游戏里有一局打到一半的话，从地图接手往下打（后面和工具自己开的局一样走，"
+                "档位规定要撤退重开的时候照样会撤退，那一局就没了）；没有进行中的一局就照常开新的。")
+    else:
+        log.say("  请先把游戏停在「迷宫首页」。")
     log.say(f"  档位：{tier.name}——{tier.blurb}。")
     if tier.reroll:
         log.say("  这一档凹的东西：首领" + (f"只留 {'、'.join(reroll['boss_want'])}" if reroll["boss_want"] else "不挑")
@@ -430,6 +438,7 @@ def main() -> int:
     t_begin = time.time()
     base_taps, base_seconds = limits.max_taps, limits.max_seconds
     lap, restarts, relaps, adopt, misses = 1, 0, 0, False, 0
+    resume = bool(args.resume)                       # 接着打进行中的一局：只对这一次的第一局有用（撤退重开以后开的都是新的一局）
     try:
         while True:
             if stop_ts is not None and time.time() >= stop_ts:
@@ -470,8 +479,9 @@ def main() -> int:
                         shop_refresh_max=int(shop_cfg.get("refresh_max", 600)),
                         scout=bool(wk.get("scout_bosses", True)), boss_avoid=list(wk.get("boss_avoid") or []), advisor=advisor,
                         damage=dmg, damage_report=report_on, adopt=adopt, tier=tier, reroll=reroll,
-                        auto_equip=auto_equip, settle_score=settle, settle_spend=settle_spend, final_stop=final_stop)
-            adopt = False
+                        auto_equip=auto_equip, settle_score=settle, settle_spend=settle_spend, final_stop=final_stop,
+                        resume=resume)
+            adopt, resume = False, False
             try:
                 res = flow.run()
             except Relap as e:
@@ -483,12 +493,14 @@ def main() -> int:
                 log.event("relap", why=str(e), n=relaps)
                 adopt = True
                 continue
-            rows.append({"n": len(rows) + 1, "guild": guild, "fights": res.get("fights") or [], "minutes": res.get("seconds", 0) / 60.0, "moves": len(res["moves"]), "battles": res["battles"],
+            took = bool(res.get("took_over"))            # 这一局是接手的：是哪个公会、出发前有几张门票，工具都没看到
+            pass_note = "这一局是接手的，出发前的门票数量我没看到，没法比（撤退会把这一局的门票退回，可以看一眼）" if took else "门票数量和出发前一样"
+            rows.append({"n": len(rows) + 1, "guild": "（接手的一局）" if took else guild, "fights": res.get("fights") or [], "minutes": res.get("seconds", 0) / 60.0, "moves": len(res["moves"]), "battles": res["battles"],
                          "losses": res.get("losses"), "score": res.get("score_if_cleared") if (res.get("cleared") or res.get("at_final")) else None,
                          "result": "打通了" if res.get("cleared") else "停在最终首领跟前" if res.get("hold") else "没到分，撤退重打" if res.get("settled") == "redo"
                          else "走到最终首领跟前，撤退" if res.get("at_final")
                          else f"撤退（{res.get('why') or '没写原因'}）"})
-            if res.get("cleared") or res.get("at_final"):      # 走完了的一局：按公会记成绩（刷分挑公会用）
+            if (res.get("cleared") or res.get("at_final")) and not took:      # 走完了的一局：按公会记成绩（刷分挑公会用）；接手的那一局不知道是哪个公会，不记
                 gbook.record(guild, res.get("score_if_cleared"), res.get("seconds", 0) / 60.0, "cleared" if res.get("cleared") else "final", tier.n)
                 gbook.save()
             log.say("")
@@ -544,7 +556,7 @@ def main() -> int:
                 continue
             elif res.get("at_final"):
                 log.say(f"  ✓ 走到最终首领跟前了：{len(res['moves'])} 格、{res['battles']} 场战斗，累计点了 {res['taps']} 下，这一趟用时 {res['seconds'] / 60:.0f} 分钟。"
-                        f"已撤退，门票数量和出发前一样。撤退前的地图存了一张原图（shots 里的 before_final_boss）。")
+                        f"已撤退，{pass_note}。撤退前的地图存了一张原图（shots 里的 before_final_boss）。")
                 h = res.get("hud") or {}
                 if res.get("score_if_cleared"):
                     log.say(f"  这一局要是把最终首领打掉，最终分数是 {res['score_if_cleared']:,}"
@@ -556,7 +568,7 @@ def main() -> int:
                     log.say("  " + shops_summary(res.get("shops") or [], h.get("coins")))
             else:
                 log.say(f"  ✓ 这一趟：{len(res['moves'])} 格、{res['battles']} 场战斗，累计点了 {res['taps']} 下；"
-                        f"撤退原因：{res['why']}；门票数量和出发前一样。")
+                        f"撤退原因：{res['why']}；{pass_note}。")
                 if res["restart"]:
                     restarts += 1
                     if restarts > max_restarts:

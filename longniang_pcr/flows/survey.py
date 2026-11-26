@@ -74,9 +74,10 @@ class Tracker:
 
 
 class Survey:
-    def __init__(self, runner: Runner, area: int, thr: float = RT.EDGE_THR):
+    def __init__(self, runner: Runner, area: int, thr: float = RT.EDGE_THR, mid: bool = False):
         self.r = runner
         self.thr = thr
+        self.mid = mid                               # 从区域中途开始看的（接手进行中的一局）：人物左边还有走过的列，那些列不记、对图时也不拿它们当错
         self.map = AreaMap(area=area)
         self.offset = 0.0                            # 地图比开始时往左挪了多少
         self.x0 = HOME_X                             # 开始时第 0 列（出发点 / 人物）的横坐标
@@ -137,6 +138,8 @@ class Survey:
             for x, tl in cols:
                 pos = (x + off - self.x0) / TL.COL_DX
                 c = int(round(pos))
+                if self.mid and c < 1 and abs(pos - c) * TL.COL_DX <= 45:
+                    continue                         # 走过的列（人物所在的那一列和它左边的）：地图里没记，不比
                 if abs(pos - c) * TL.COL_DX > 45 or c < 1:
                     bad = True
                     break

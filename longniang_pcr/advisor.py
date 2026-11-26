@@ -9,6 +9,13 @@
   · 真机输过几次，就把敌人的伤害再往上估一档（估算已经被证明偏乐观了）；这一局真机赢过的人略微优先。
 估算不了的战斗（普通小怪、敌人没认出来、名单里认得的人不够）还是照 strategy.py 的规则排。
 
+2026-11-27（正式版 V1.06）用户又定了两句：“把所有极难关按攻略优化一下”“秒不掉 boss 的情况就走机制”。所以极难关现在是：
+  · 先照上面的办法挑出推演最好的一队。它本来就合攻略点名的要求（strategy.guide_gaps 是空的）→ 就上它。
+  · 不合 → 看秒不秒得掉：真机用时是推演的几倍，就把敌人的血量乘几倍再推演一遍（burstable），敌人放大招之前就打完、没人倒 → 秒得掉，不管机制，上它；
+    秒不掉（或者对策表写了 no_burst：机制从开打就起作用 / 这一关的推演没在真机上核过）→ 按机制来：再搜一遍，和攻略每差一个要求扣 OFF_GUIDE，
+    推演只在合攻略的队里比快慢。两遍搜索共用同一份推演结果，不会多花一倍时间。
+  区域 3 首领和最终首领不受这个影响（用户说的是极难关）。
+
 时间：估算里的“秒”是游戏里的秒（战斗画面右上角计时器走的秒）。真机是 4 倍速，放 UB 动画时计时器停着，
 所以记录里的现实秒数主要是在数 UB 动画，不能拿来和估算比——2026-11-19 那两版校准都栽在这上面（先当成 1 倍、又当成 2 倍）。
 11-24 起每场战斗读计时器（vision/battle.py），记录里的 game 才是真的用时。
@@ -31,6 +38,12 @@ RETRY_STEP = 0.4                                    # 真机每输一次，敌�
 ROUNDS = 2                                          # 从起点出发换人推演几轮（每轮每个位置都把名单里别的人试一遍）
 STARTS = 2                                          # 从最好的几个起点出发
 BUDGET = 12.0                                       # 一场战斗挑队最多花这么多秒推演，到点就用当时最好的
+OFF_GUIDE = 5000.0                                  # 极难关按攻略来：和攻略点名的要求（站位、哪一边、范围输出、点名的效果……）每差一个扣这么多——
+                                                    # 比打得赢打不赢的差距还大，所以名单里排得出合攻略的队时，挑出来的一定是合攻略的；推演只在这些队里比快慢
+BURST_SEC = 15.0                                    # “秒得掉”：按真机用时折算以后，这么多秒（游戏里的秒）以内打完才算——首领的第一个大招大约就在这前后
+GUIDE_BUDGET = 8.0                                  # 按攻略重新挑的那一遍搜索最多花这么多秒（第一遍推演过的队不用再算）
+REAL_X = 2.0                                        # 真机上的用时大约是推演的几倍（2026-11-27 拿 43 场带计时器读数的赢的记录算的中位数 2.04）：
+                                                    # 判断“秒不秒得掉”时把敌人的血量乘这个倍数再推演。对策表里给单个敌人写了 real_x 的用那个；这台电脑自己有记录的取大的
 PROVEN = 2.0                                        # 这一局真机上赢过的人：每赢一场加这么多（最多算 3 场）——估算差不多时沿用赢过的队
 # 遗物系列每一点大概值多少（同一系列的五种遗物各占五分之一来平均；工具现在只知道每个系列有几点，不知道具体是哪件）
 SERIES = {"power": {"atk_pct": 6.0, "def_pct": 2.0, "buff_pct": 6.0}, "weaken": {"enemy_atk_pct": -2.0, "enemy_def_pct": -2.0},
@@ -97,12 +110,26 @@ class Advisor:
         pes = BT.simulate(self.data, list(names), stage, worse(mods))
         return value(nom, pes), nom, pes
 
+    def burstable(self, names: Sequence[str], stage: str, mods: dict[str, float], real_x: float) -> tuple[bool, BT.Result, BT.Result]:
+        """秒不秒得掉：真机上的用时大约是推演的 real_x 倍，所以把敌人的血量乘 real_x 再推演两遍（照常、往坏里估）——
+        两遍都赢、敌人都没来得及放 UB、照常那一遍没人倒、而且 BURST_SEC 秒以内打完，才算秒得掉。返回（秒得掉吗, 照常那一遍, 往坏里估那一遍）。"""
+        m = dict(mods)
+        m["enemy_hp"] = m.get("enemy_hp", 1.0) * max(1.0, float(real_x))
+        nom = BT.simulate(self.data, list(names), stage, m)
+        pes = BT.simulate(self.data, list(names), stage, worse(m))
+        return bool(nom.win and pes.win and nom.time <= BURST_SEC and not nom.enemy_ub and not pes.enemy_ub and not nom.deaths), nom, pes
+
     def search(self, units: Sequence[Any], stage: str, mods: dict[str, float], seeds: Iterable[Sequence[Any]], lost: Sequence[Sequence[str]] = (),
-               wins: dict[str, int] | None = None) -> dict[str, Any] | None:
-        """units = 名单（strategy.Unit）；seeds = 搜索的起点（规则排出来的几队）。返回 {"team": [Unit…], "value", "nom", "pes", "tried", "seeds": [...]}；一队都推演不了返回 None。"""
+               wins: dict[str, int] | None = None, fit: Callable[[Sequence[Any]], float] | None = None,
+               cache: dict[frozenset, tuple[float, BT.Result, BT.Result]] | None = None, budget: float | None = None) -> dict[str, Any] | None:
+        """units = 名单（strategy.Unit）；seeds = 搜索的起点（规则排出来的几队）。返回 {"team": [Unit…], "value", "nom", "pes", "tried", "seeds": [...]}；一队都推演不了返回 None。
+        fit = 攻略的硬要求（给一队人、返回要扣多少分，0 = 合要求）：扣得比胜负的差距还大，所以只要名单里排得出合要求的队，挑出来的一定是合要求的。
+        cache = 推演过的队（不含 fit 的扣分）：同一场战斗搜两遍（先不管攻略、再按攻略）时传同一个，推演过的队不再算。"""
         can = [u for u in units if self.knows(u.name)]
         lost_sets = [frozenset(t) for t in lost if t]
-        seen: dict[frozenset, tuple[float, BT.Result, BT.Result]] = {}
+        seen: dict[frozenset, tuple[float, BT.Result, BT.Result]] = cache if cache is not None else {}
+        fits: dict[frozenset, float] = {}
+        tried: set[frozenset] = set()
 
         def ok(team: Sequence[Any]) -> bool:
             names = [u.name for u in team]
@@ -113,10 +140,16 @@ class Advisor:
 
         def score(team: Sequence[Any]) -> tuple[float, BT.Result, BT.Result]:
             key = frozenset(u.name for u in team)
+            tried.add(key)
             if key not in seen:
                 v, nom, pes = self.run(sorted(key), stage, mods)
                 seen[key] = (v + PROVEN * sum(min(3, int((wins or {}).get(n, 0) or 0)) for n in key), nom, pes)
-            return seen[key]
+            v, nom, pes = seen[key]
+            if fit is not None:
+                if key not in fits:
+                    fits[key] = float(fit(team))
+                v -= fits[key]
+            return v, nom, pes
 
         starts = []
         for s in seeds:
@@ -129,7 +162,7 @@ class Advisor:
         report = [{"names": [u.name for u in s], "value": round(v, 1), "nom": brief(score(s)[1]), "pes": brief(score(s)[2])} for v, s in starts]
         pool_list = list(can)                       # 整个名单都能换进来：谁上谁下由推演说了算，不按职能、强度档、是不是竞技场角色筛
         best_v, best = starts[0]
-        t_end = time.time() + BUDGET
+        t_end = time.time() + (BUDGET if budget is None else float(budget))
         for start_v, start in starts[:STARTS]:
             cur_v, cur = start_v, list(start)
             for _ in range(ROUNDS):
@@ -151,7 +184,7 @@ class Advisor:
             if cur_v > best_v:
                 best_v, best = cur_v, cur
         v, nom, pes = score(best)
-        return {"team": best, "value": v, "nom": nom, "pes": pes, "tried": len(seen), "seeds": report}
+        return {"team": best, "value": v, "nom": nom, "pes": pes, "tried": len(tried), "seeds": report}
 
 
 def load(data_dir: Any) -> Advisor | None:

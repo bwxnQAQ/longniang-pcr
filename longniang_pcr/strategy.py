@@ -48,6 +48,13 @@
   · 名单里没有坦克的时候，可以让够肉的前排顶在最前面当坦克用（那一趟打厄勒克特拉夫人：名单 27 人没有一个坦克，工具三次都上同一队全输出；
     用户换成 纯（夏日）站最前面就打过了）。谁肉看 data/characters.json 的 tough（按资料站的生命值、物防、魔防算的耐打程度，一般坦克 = 1）。
   · 迷宫遗物优先选削弱（弱体）系列，其次加速。
+- 2026-11-27（正式版 V1.06，两个玩家的排查包）：
+  · 幽灵领主：它的 UB 打“最前面的人和她周围”，范围里站了两个以上就一起倒，只站一个她反而活得下来（手头 9 场输的记录都是这么倒的）。
+    用户要“按攻略上一个坦克和四个后排”：对策表给它写了 spread——最前面只留一个人，其余的人都要比她靠后这么多。规则排队和战斗估算都照这个来
+    （估算只在站位拉开的队里挑；battle.py 也把这一下补上了）。第一次打就带坦克站最前面（always），名单里没有坦克就让最耐打的前排顶。
+  · 攻略点名要范围输出的关（need_hit = aoe：回复装置、破防装置、炸弹装置、美空……）以前只是“加一点分”，被同属性加成和“沿用赢过的人”盖过去，
+    排出来的还是一队打单体的。现在：**极难关**里这种关会打一群的输出至少要 AOE_WANT 个（名单里没那么多就有几个带几个）；首领战不动。
+    页面上没有名字、画面也认不出是哪一组的极难关，按“要范围输出”排（没见过的那两组——回复装置、炸弹装置——攻略都点名要范围输出）。
 
 出处（细节见开发计划「策略细则」）：
 - note ω4.1《黎明界ラビリンスで「スコアを高くするために」考えていること》（日服，目标极难全踩、稳定 5 万分）：
@@ -159,6 +166,9 @@ HIT_SELF = 20.0                                        # 同上：会挨打的�
 TANK_FIT = 20.0                                        # 同上：站最前面的坦克按“对这种伤害的耐打程度”和一般坦克（1）的差加减分，上下最多各 0.5——物理首领带物防高的坦克，魔法首领带魔防高的
 HEAL_BACK = 15.0                                       # 对策表写了 heal_back（毒液沙罗曼蛇：前 3 个位置会被降攻击，而奶量看奶自己的攻击力）：有奶的人站最后两个位置加这么多，站前三个扣这么多
 NO_DEALER = 60.0                                       # 一队里一个输出（攻击 / 破防）都没有：扣这么多（全是辅助打不死人；点名要“打一群”时会把只会打单体的输出扣掉，别扣到一个不剩）
+SPREAD_NEAR = 200.0                                    # 对策表写了 spread（敌人的大招打“最前面的人和她周围”：幽灵领主）：除了最前面那个人，每多一个站在这个范围里的扣这么多
+                                                       # ——比“攻略点名的效果”（MECH 150）还大：带降魔攻的人站在范围里一样会一起倒，先把站位拉开，再在这样的队里挑人
+AOE_WANT = 3                                           # 极难关里攻略点名要范围输出（need_hit = aoe）的：队里会打一群的输出至少要这么多个（名单里没那么多就有几个带几个）
 REPEAT_AVOID = 25.0                                    # 排出来的队和输过的某一队一模一样：把这一队里不是保命位的人各扣这么多再排一次
 KEEP = 0.6                                             # 已经在队里的人：分数一样时不换，少点几下
 MARK_ORDER = ["dark", "fire", "light", "water", "wind"]
@@ -278,6 +288,101 @@ def fit_targets(u: Unit, targets: str | None) -> float:
     return ONE_FIT if u.hit in ("single", "both") else -ONE_MISS
 
 
+def crowd(team: Sequence[Unit], gap: float) -> int | None:
+    """除了站最前面的那个人，还有几个人站在离她 gap 以内（敌人打“最前面的人和她周围”的技能会把她们一起带上）。
+    有人的站位不知道就说不准，返回 None。"""
+    if not team or gap <= 0 or any(u.pos is None for u in team):
+        return None
+    front = min(team, key=lambda z: z.pos)
+    return sum(1 for u in team if u is not front and u.pos - front.pos < gap)
+
+
+def roster_facts(units: Sequence[Unit], tweak: dict[str, Any] | None = None) -> dict[str, Any]:
+    """名单里“做得到什么”（核对攻略要求时用：名单里根本没有那种人，就不算差）。一份名单算一次，排队时每一队都拿它对。"""
+    want = frozenset((tweak or {}).get("want") or [])
+    return {"tank": any(u.kind == "tank" for u in units),
+            "sturdy": any(u.tough >= TOUGH_MIN and u.pos is not None and u.pos < STAND_IN_ROW for u in units),
+            "heal": any(can_heal(u) for u in units),
+            "aoe": aoe_dealers(units),
+            "side": {sd: sum(1 for u in units if u.kind in DAMAGE and u.atk == sd) for sd in SIDES},
+            "want": len({u.base or u.name or id(u) for u in units if u.effective or (want & u.tags)}) if want else 0,
+            "placed": sum(1 for u in units if u.pos is not None)}
+
+
+def weak_front(team: Sequence[Unit], units: Sequence[Unit] | dict[str, Any]) -> bool:
+    """站位拉开的打法里，独自站最前面的那个人要撑到敌人放大招：名单里有坦克就该是坦克；没有坦克、但有够肉的前排 / 中排（能顶的人），就该是够肉的。
+    返回 True = 这一队最前面的人不合这个要求（名单里明明有更合适的）。名单里既没有坦克也没有够肉的人、或者站位说不准，返回 False（没得挑）。
+    units 可以是名单，也可以是 roster_facts 算好的那份。"""
+    if not team or any(u.pos is None for u in team):
+        return False
+    facts = units if isinstance(units, dict) else roster_facts(units)
+    front = min(team, key=lambda z: z.pos)
+    if facts["tank"]:
+        return front.kind != "tank"
+    if facts["sturdy"]:
+        return front.tough < TOUGH_MIN
+    return False
+
+
+def aoe_dealers(units: Iterable[Unit]) -> int:
+    """名单里会打一群的输出（攻击 / 破防，打一群或者两样都行）有几个；同一个角色的几个版本只算一个。"""
+    return len({u.base or u.name or id(u) for u in units if u.kind in DAMAGE and u.hit in ("aoe", "both")})
+
+
+PACK_FAR = 450                                         # 对策表写了 pack（站位要集中：熔岩龙）：比最前面的人靠后超过这么多的人，算“没挤在一起”。
+                                                       # 熔岩龙的范围技能是“最前面的人和她周围 400”，按真机上幽灵领主量出来的余量再加 50；
+                                                       # 真机记录：五个人都在 450 以内的三场都赢了，有两个人在 450 以外的那一场输了
+SIDE_MIN = 2                                           # 对策表写了敌人吃哪边（side）：名单里那一边的输出至少有这么多个，才硬要求用那一边
+WANT_HARD = 2                                          # 攻略点名的效果（持续伤害……）：硬要求最多带这么多个（再多的只是加分——同一种持续伤害不叠，工具分不出是哪一种）
+GUIDE_GAP = 200.0                                      # 极难关按攻略来（tweak 里 strict）：和攻略点名的要求每差一个扣这么多——和“要带的坦克 / 奶”（NEED_GUARD）一个量级
+
+
+def guide_gaps(team: Sequence[Unit], units: Sequence[Unit] | dict[str, Any], tweak: dict[str, Any] | None) -> list[tuple[str, int]]:
+    """这一队和攻略对这个敌人点名的要求差在哪：[(差的是什么, 差几个)]，空的 = 都合。只数“名单里明明做得到”的——
+    名单里根本没有那种人，不算差（units 可以是名单，也可以是 roster_facts 算好的那份）。
+    2026-11-27 用户定的：极难关按攻略来；估算下来秒得掉（敌人放大招之前就打完）才不管机制。
+    看这几样（对策表里写了才看）：
+      spread 站位拉开（除了最前面那个人，范围里还站着几个）、独自站最前面的人是不是坦克 / 够肉的人；
+      side 敌人吃哪边（名单里那一边凑得出输出才要求）；need_hit = aoe 会打一群的输出够不够数；
+      want + effect 攻略点名的效果（持续伤害……）带了几个；always 第一次打就要带的坦克 / 奶；pack 站位集中。"""
+    tw = tweak or {}
+    out: list[tuple[str, int]] = []
+    if not team:
+        return out
+    facts = units if isinstance(units, dict) else roster_facts(units, tw)
+    front = min(team, key=lambda z: z.pos) if all(u.pos is not None for u in team) else None
+    gap = float(tw.get("spread") or 0.0)
+    if gap > 0:
+        n = crowd(team, gap) or 0
+        if n:
+            out.append((f"站位没拉开：除了最前面的人，还有 {n} 个人站在离她 {gap:g} 以内", n))
+        if weak_front(team, facts):
+            out.append(("独自站最前面的人不是坦克" if facts["tank"] else "独自站最前面的人不够肉", 1))
+    side = tw.get("side")
+    if side in SIDES and facts["side"].get(side, 0) >= SIDE_MIN and team_side(team) != side:
+        out.append((f"攻略说这个敌人吃{SIDE_CN[side]}，这一队不是", 1))
+    if tw.get("need_hit") == "aoe":
+        short = min(AOE_WANT, facts["aoe"]) - sum(1 for u in team if u.kind in DAMAGE and u.hit in ("aoe", "both"))
+        if short > 0:
+            out.append((f"会打一群的输出少 {short} 个", short))
+    want = frozenset(tw.get("want") or [])
+    eff = min(WANT_HARD, int(tw.get("effect", 0) or 0))
+    if want and eff > 0 and gap <= 0:                # 要站位拉开的敌人：点名的效果带不带看站不站得开，不硬要求
+        short = min(eff, facts["want"]) - sum(1 for u in team if u.effective or (want & u.tags))
+        if short > 0:
+            out.append((f"攻略点名的效果（{'、'.join(TAG_CN.get(t, t) for t in sorted(want))}）少带 {short} 个", short))
+    always = [r for r in (tw.get("always") or []) if r in GUARD]
+    if "tank" in always and gap <= 0 and facts["tank"] and tank_in_front(team) is not True:
+        out.append(("没带站最前面的坦克", 1))
+    if "heal" in always and facts["heal"] and not any(can_heal(u) for u in team):
+        out.append(("没带有奶的人", 1))
+    if tw.get("pack") and front is not None and facts["placed"] >= 5:
+        far = sum(1 for u in team if u is not front and u.pos - front.pos > PACK_FAR)
+        if far:
+            out.append((f"站位不集中：有 {far} 个人比最前面的人靠后 {PACK_FAR} 以上（它的范围技能打不到她们，前面的人就要多挨）", far))
+    return out
+
+
 def tank_in_front(team: Sequence[Unit]) -> bool | None:
     """队里的坦克是不是站在最前面（站位数比其他人都小）。坦克不在最前面就挡不了刀，带了也没意义。
     队里没有坦克、或者坦克的站位不知道，返回 None（不判断）；和别人站位一样、分不出谁在前，算 False。"""
@@ -390,6 +495,13 @@ def team_score(team: Sequence[Unit], profile: str, weak: str | None = None, twea
     if (tweak or {}).get("heal_back") and front is not None and len(team) >= 4:
         back = sorted(team, key=lambda z: z.pos)[-2:]
         total += sum((HEAL_BACK if any(u is b for b in back) else -HEAL_BACK) for u in team if can_heal(u))
+    facts = (tweak or {}).get("_facts")
+    if (tweak or {}).get("strict") and facts:        # 极难关按攻略来：和攻略点名的要求每差一个都重扣（名单里做不到的不算）
+        total -= GUIDE_GAP * sum(n for _, n in guide_gaps(team, facts, tweak))
+    else:                                            # 不是极难关（首领战 / 普通战）：只留“站位拉开”这一条软的；范围输出的个数不硬凑（首领战照 11-19 那一套）
+        gap = float((tweak or {}).get("spread") or 0.0)
+        if gap > 0:                                  # 站位拉开：最前面只留一个人，其余的人都要比她靠后 gap 以上
+            total -= SPREAD_NEAR * (crowd(team, gap) or 0)
     if (tweak or {}).get("pack") and front is not None:
         total -= PACK_STEP * sum(max(0.0, u.pos - front.pos - PACK_FREE) for u in team if u is not front) / 100.0
     for role in need:
@@ -619,6 +731,8 @@ def choose_team(units: Sequence[Unit], kind: str = "normal", weak: str | None = 
         if attempt == 0:                             # 第一次打：不管对策表和游戏怎么说，先不上坦克治疗（写了 always 的除外）
             tweak = first_try(tweak)
     must = [u for u in must]
+    if (tweak or {}).get("strict") and "_facts" not in tweak:                   # 极难关按攻略来：名单里做得到什么，先算好
+        tweak = {**tweak, "_facts": roster_facts(units, tweak)}
     if any(u.kind == "tank" for u in units):          # 名单里有坦克：要坦克就带真坦克，不拿别人顶
         tweak = {**(tweak or {}), "stand_in": False}
     rest = [u for u in units if not any(u is m for m in must)]

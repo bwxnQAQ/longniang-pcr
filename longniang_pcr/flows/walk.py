@@ -712,12 +712,28 @@ class Walk:
         self.pending, self.tb = None, None
         self.map_idle = self.arrive_wait = 0
 
+    BATTLE_TICK = 60.0                               # 计时器这么久没动过，才算“这场仗卡住了”（放 UB 动画时它会停几秒，不会停这么久）
+
+    def _battle_cap(self) -> tuple[float, int]:
+        """这场战斗最多等多久（秒），和它是几队的仗。battle_timeout 是**一队**的时间：首领战派了几队就乘几——
+        几队是一队打完（或者倒了）下一队接着上，画面一直是战斗中，中间不会出 WIN!。
+        （2026-11-26 玩家反馈：最终首领派了 3 队，300 秒不够，被当成“打了超过 300 秒还没结束”停了。）"""
+        teams = max(1, self._boss_teams()) if self.battle_kind == "boss" else 1
+        return float(self.battle_timeout) * teams, teams
+
     def _watch_battle(self) -> None:
-        """战斗中：不点任何东西，等到出现 WIN!。打太久或者画面一直不认识（可能是打输了）就停。"""
+        """战斗中：不点任何东西，等到出现 WIN!。打太久或者画面一直不认识（可能是打输了）就停。
+
+        “太久”：过了 _battle_cap 的时间、而且计时器已经 BATTLE_TICK 秒没动过。计时器还在走就说明仗是真的还在打
+        （游戏开的不是 4 倍速、UB 动画多的时候会比平常久），那就接着等，最多等到两倍。"""
         r = self.r
         r.log.say("      …战斗中（AUTO），等它打完")
         r.log.event("battle_start", n=self.battles + 1)
         t0 = last_battle = time.time()
+        cap, teams = self._battle_cap()
+        last_tm: int | None = None                   # 计时器上一次读到的数，和它最后一次变化是什么时候
+        last_tick = t0
+        said_long = False
         other = 0
         self.hp_log = []
         left: int | None = None                      # 计时器上最后一次读到还剩多少秒
@@ -760,6 +776,8 @@ class Walk:
             if s.page == "battle":
                 last_battle, other = now, 0
                 tm = VB.read_timer(r.book, s.img)    # 游戏是 4 倍速、放 UB 动画时计时器会停，现实秒数说明不了打了多久；计时器才是真的
+                if tm is not None and tm != last_tm:
+                    last_tm, last_tick = tm, now
                 if tm is not None and (left is None or tm <= left):
                     left = tm
                 if self.team_mode == "role":         # 记一下每个人还剩多少血：打输了靠它分“从前面一个个倒”还是“全队一起崩”
@@ -772,11 +790,21 @@ class Walk:
                 if other >= 3:                       # 出现了别的认识的页面：交回主流程处理
                     r.log.event("battle_end", seconds=round(now - t0, 1), result=s.page)
                     return
-            if now - t0 > self.battle_timeout or now - last_battle > 60.0:
+            over = now - t0 > cap
+            if over and now - last_tick <= self.BATTLE_TICK and now - t0 <= 2 * cap:
+                over = False                         # 计时器还在走：仗是真的还在打，接着等（最多等到两倍）
+                if not said_long:
+                    said_long = True
+                    r.log.say(f"      …这场已经打了 {now - t0:.0f} 秒，比平常久；计时器还在走，接着等（最多等到 {2 * cap:.0f} 秒）")
+                    r.log.event("battle_long", seconds=round(now - t0, 1), cap=cap, teams=teams, timer=last_tm)
+            if over or now - last_battle > 60.0:
                 files = r.log.dump_recent("battle")
-                r.log.event("halt", why="battle", shots=files)
-                raise Halt("战斗画面离开超过 1 分钟还没出现 WIN!（可能是打输了，失败画面我还没见过）"
-                           if now - last_battle > 60.0 else f"这场战斗打了超过 {self.battle_timeout:.0f} 秒还没结束")
+                r.log.event("halt", why="battle", shots=files, seconds=round(now - t0, 1), cap=cap, teams=teams)
+                if now - last_battle > 60.0:
+                    raise Halt("战斗画面离开超过 1 分钟还没出现 WIN!（可能是打输了，失败画面我还没见过）")
+                how = f"首领战派了 {teams} 队，每队按 {self.battle_timeout:.0f} 秒算" if teams > 1 else f"一场按 {self.battle_timeout:.0f} 秒算"
+                still = "计时器还在走，但已经等到两倍了" if now - last_tick <= self.BATTLE_TICK else f"计时器也有 {now - last_tick:.0f} 秒没动过了"
+                raise Halt(f"这场战斗打了超过 {now - t0:.0f} 秒还没结束（{how}；{still}）")
             r.pause(0.5)
 
     # ---- 各页面 ----

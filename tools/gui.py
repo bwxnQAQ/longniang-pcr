@@ -287,6 +287,10 @@ class Launcher:
                     self.facts["losses"] = int(self.facts.get("losses", 0)) + 1
                 elif "我自己走回迷宫" in t:
                     self.facts["recovers"] = int(self.facts.get("recovers", 0)) + 1
+                if "请你在模拟器里手动点过去" in t:          # 有个画面认不出来，在等你动手：界面上亮出来
+                    self.facts["hand"] = 1
+                elif self.facts.get("hand") and (t.startswith("认出来了") or t.startswith(_WHY)):
+                    self.facts.pop("hand", None)
                 if "laps" in self.facts and "lap" not in self.facts:
                     self.facts["lap"] = "1"
                 if not t or not re.search(r"[0-9A-Za-z\u4e00-\u9fff]", t) or t.startswith(("——", "====")):
@@ -525,6 +529,8 @@ body.detail #left{flex:none;width:440px}
 .t正式{background:var(--ok)}.t测试{background:var(--warn)}.t一次性{background:#7a8794}
 #hero{background:linear-gradient(180deg,#fff 0%,#f7f9ff 100%)}
 #first{background:linear-gradient(180deg,#fffaf0,#fff);border-color:#e6cf93}
+#newver{background:#eef6ff;border-color:#7fb0ee;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#newver span{flex:1;min-width:150px;font-size:13px}
 #tiers{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
 body.detail #tiers{grid-template-columns:repeat(2,1fr)}
 .tier{border:1.5px solid var(--line);border-radius:10px;padding:8px 10px;cursor:pointer;background:#fff;transition:border-color .12s,box-shadow .12s;position:relative}
@@ -678,7 +684,7 @@ details.runs{margin:2px 0 8px}details.runs>summary{cursor:pointer;font-size:12px
 <div id="chips"></div>
 <div id="ask"><div id="askq"></div><div id="askrow"><span id="askbtns"></span>
  <input id="inp" placeholder="在这里填你的回答，按回车" onkeydown="if(event.key==='Enter')send()"><button id="asksend" onclick="send()">确定</button></div></div>
-<main><div id="left"><div id="first" class="card" style="display:none"></div><div id="hero" class="card" style="display:none"></div><div id="cards"></div><details id="stats" class="card"><summary>统计<small id="statsn"></small></summary><div id="statsbody" class="note"></div></details><details id="more" class="card"><summary>其他</summary><div id="grid"></div></details></div><div id="right"><div id="log"></div></div></main>
+<main><div id="left"><div id="newver" class="card" style="display:none"></div><div id="first" class="card" style="display:none"></div><div id="hero" class="card" style="display:none"></div><div id="cards"></div><details id="stats" class="card"><summary>统计<small id="statsn"></small></summary><div id="statsbody" class="note"></div></details><details id="more" class="card"><summary>其他</summary><div id="grid"></div></details></div><div id="right"><div id="log"></div></div></main>
 <footer id="foot"><span id="qq" title="出了问题：在「其他」里点「导出排查包」，把生成的 zip 发到这个 QQ 群里，再说一下当时在做什么、哪里不对">QQ群 __QQ__</span></footer>
 <div id="dlg" hidden><div id="dlgbox" role="dialog" aria-modal="true" aria-labelledby="dlgttl"><div id="dlgttl">龙娘pcr</div><div id="dlgmsg"></div>
  <div id="dlgbtn"><button id="dlgno" class="ghost" onclick="dlgClose(false)">取消</button><button id="dlgok" class="primary" onclick="dlgClose(true)">确定</button></div></div></div>
@@ -717,7 +723,7 @@ function fitToContent(){
 let fitSig = '';
 function fitIfChanged(){             // 上面那几样（小标签、问你的那一条、首次设置）出现 / 消失 / 变高了：重新量一次
   const hh = id => { const e = $(id); return e ? e.offsetHeight : 0; };
-  const sig = [hh('chips'), hh('ask'), hh('first'), hh('hero'), hh('status')].join(',');
+  const sig = [hh('chips'), hh('ask'), hh('newver'), hh('first'), hh('hero'), hh('status')].join(',');
   if (sig !== fitSig){ fitSig = sig; setTimeout(fitToContent, 30); }
 }
 fitWindow(); window.addEventListener('load', () => setTimeout(fitWindow, 300));
@@ -810,11 +816,25 @@ function farmAdd(){
 function pickTier(n){ tier = n; for (const el of document.querySelectorAll('.tier')) el.classList.toggle('on', Number(el.dataset.n) === n);
   const tb = $('tierbl'), cur = tiers.find(t => t.n === n); if (tb) tb.textContent = cur ? cur.blurb : '';
   for (const el of document.querySelectorAll('.t1only')) el.style.display = n === 1 ? 'inline-flex' : 'none'; }
+// 打开界面时后台自动查了一次有没有新版本：有就在最上面亮一条。换不换还是你点——点「更新」走的就是「检查更新」那一项
+async function checkNew(n){
+  let u; try { u = await api('/api/update_info'); } catch (e) { return; }
+  if (u.state === 'pending'){ if ((n || 0) < 20) setTimeout(() => checkNew((n || 0) + 1), 1500); return; }
+  if (u.state === 'new') drawNew(u);
+}
+function drawNew(u){
+  const el = $('newver');
+  el.innerHTML = '<span>有新版本 <b>' + esc(u.show) + '</b>（现在是 ' + esc(u.have) + '）</span>' +
+    '<button class="primary" data-key="5" onclick="hideNew(); run(\'5\')">更新</button><button class="ghost" onclick="hideNew()">这次不用</button>';
+  el.style.display = '';
+  setButtons(); fitIfChanged();
+}
+function hideNew(){ $('newver').style.display = 'none'; fitIfChanged(); }
 function drawFirst(){
   const el = $('first');
   if (!firstRun){ el.style.display = 'none'; return; }
   el.innerHTML = '<h2>首次设置 <small>只在第一次用的时候做一遍</small></h2>' +
-    '<div class="note">看运行环境、模拟器、挂机要用的几样行不行（不点游戏，约一分钟），不行的直接告诉你怎么改；最后问要不要扫描角色。先把 MuMu 开起来。</div>' +
+    '<div class="note">看运行环境、模拟器、挂机要用的几样行不行（不点游戏，约一分钟），不行的直接告诉你怎么改；最后问要不要扫描角色。先把 MuMu 开起来。<br>另外请在游戏里把迷宫的「角色加入动画」设成「不播放」：迷宫地图右上角「菜单」→「设定」。</div>' +
     '<div class="gorow"><button class="primary" data-key="9" onclick="run(\'9\')">开始首次设置</button>' +
     '<button class="ghost" data-key="9" onclick="skipFirst()">不用了</button></div>';
   el.style.display = '';
@@ -987,6 +1007,7 @@ function drawChips(f){
   if (f.wins || f.losses) c.push('<span class="chip">战斗 赢 <b>' + (f.wins || 0) + '</b> · 输 <b>' + (f.losses || 0) + '</b></span>');
   if (f.restarts) c.push('<span class="chip">重开 <b>' + f.restarts + '</b> 次</span>');
   if (f.recovers) c.push('<span class="chip">走回迷宫 <b>' + f.recovers + '</b> 次</span>');
+  if (f.hand) c.push('<span class="chip gold"><b>有个画面认不出来：请到模拟器里手动点过去</b></span>');
   if (f.score) c.push('<span class="chip gold">打掉最终首领能得 <b>' + esc(f.score) + '</b> 分</span>');
   $('chips').innerHTML = c.join(''); $('chips').className = c.length ? 'on' : '';
 }
@@ -1026,9 +1047,10 @@ async function poll(){
   running = s.running;
   if (s.restart && !running){ restartNow(); return; }
   const bad = !running && s.last && (s.why || s.last.indexOf('正常') < 0);
-  $('status').className = running ? (s.asking ? 'ask' : 'run') : (bad ? 'bad' : '');
-  $('what').textContent = running ? (s.asking ? '在问你' : '正在运行') + '：' + s.name + '（' + fmt(s.seconds) + '）' : (s.last ? '上一项' : '空闲');
-  $('doing').textContent = running ? (s.asking ? '等你回答——在下面选一个' : (s.doing || '……')) : (s.last ? (s.why ? s.why + '　' : '') + s.last : '选好档位，点「开始」');
+  const hand = running && !!(s.facts || {}).hand;          // 有个画面认不出来，在等你去模拟器里点
+  $('status').className = running ? ((s.asking || hand) ? 'ask' : 'run') : (bad ? 'bad' : '');
+  $('what').textContent = running ? (s.asking ? '在问你' : hand ? '等你动手' : '正在运行') + '：' + s.name + '（' + fmt(s.seconds) + '）' : (s.last ? '上一项' : '空闲');
+  $('doing').textContent = running ? (s.asking ? '等你回答——在下面选一个' : hand ? '有个画面认不出来——请到模拟器里手动点过去，我会接着跑' : (s.doing || '……')) : (s.last ? (s.why ? s.why + '　' : '') + s.last : '选好档位，点「开始」');
   $('doing').title = $('doing').textContent;
   $('bstop').style.display = running ? '' : 'none';
   $('bforce').style.display = running && s.stop_asked ? '' : 'none';
@@ -1055,9 +1077,38 @@ window.addEventListener('pagehide', () => { if (!gone) navigator.sendBeacon('/ap
   const m = await api('/api/menu'); menu = m.groups; tiers = m.tiers || []; catalog = m.catalog || {}; firstRun = !!m.first_run; drawMenu(); loadStats(); poll(); setInterval(poll, 450);
   setTimeout(fitToContent, 150); setTimeout(fitToContent, 1200);
   $('left').addEventListener('toggle', () => setTimeout(fitToContent, 30), true);
+  setTimeout(checkNew, 800);
 })();
 </script></body></html>
 """
+
+
+def update_check_on(root: Path) -> bool:
+    """打开界面时要不要自动查一次新版本：config/settings.json 里写 "update_check": false 就不查（默认查）。"""
+    if os.environ.get("LNPCR_NO_UPDATE_CHECK"):
+        return False
+    try:
+        d = json.loads((Path(root) / "config" / "settings.json").read_text(encoding="utf-8-sig"))
+        return d.get("update_check") is not False
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def check_new_version(root: Path, net: Any = None) -> dict[str, Any]:
+    """去 GitHub 看一眼这个仓库最新的版本标签，和本机的比（只读标签列表；不下载、不换——换要你点「更新」）。
+    state：new = 有新版本（show = 新的，have = 现在的）；latest = 已经是最新；failed = 没查成（没网之类，界面上不提）。"""
+    try:
+        sys.path.insert(0, str(TOOLS)) if str(TOOLS) not in sys.path else None
+        import update as UP
+
+        cur = UP.local_version(Path(root))
+        have = UP.parse_version(cur)
+        best = UP.latest(net or UP.Net(timeout=8.0))
+    except Exception as e:  # noqa: BLE001 —— 没网、被限流、GitHub 回的东西不对：都只是“这次没查成”
+        return {"state": "failed", "why": str(e)[:200]}
+    if best is None or have is None or best[0] <= have:
+        return {"state": "latest", "have": UP.show(cur) if cur else ""}
+    return {"state": "new", "tag": best[1], "show": UP.show(best[1]), "have": UP.show(cur)}
 
 
 def page_html() -> str:
@@ -1079,6 +1130,7 @@ class Server:
         self.bye = 0.0                      # 界面窗口说“我要关了”的时刻（刷新页面也会说一声，所以还要看之后有没有再来问）
         self.quit = threading.Event()
         self.fit: tuple[int, int] | None = None      # 页面量出来的窗口大小（没量之前是 None，用 WINDOW_SIZE）
+        self.update_info: dict[str, Any] = {"state": "off"}      # 打开界面时自动查新版本的结果（见 start_update_check）
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -1120,6 +1172,8 @@ class Server:
                     self._json(stats(outer.launcher.root))
                 elif path == "/api/ping":
                     self._json({"ok": True, "app": "longniang-pcr"})
+                elif path == "/api/update_info":
+                    self._json(dict(outer.update_info))
                 elif path == "/logo.png":
                     try:
                         self._send(200, LOGO.read_bytes(), "image/png")
@@ -1176,6 +1230,22 @@ class Server:
         self.httpd.daemon_threads = True
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={self.token}"
+
+    def start_update_check(self, check: Any = None) -> bool:
+        """打开界面时自动查一次有没有新版本（2026-11-26 用户要的）：在后台查，不耽误界面打开；查到新的页面上会亮一条提醒。
+        设置里关了就不查、不联网。返回这次查没查。"""
+        if not update_check_on(self.launcher.root):
+            return False
+        self.update_info = {"state": "pending"}
+
+        def work() -> None:
+            try:
+                self.update_info = (check or check_new_version)(self.launcher.root)
+            except Exception as e:  # noqa: BLE001
+                self.update_info = {"state": "failed", "why": str(e)[:200]}
+
+        threading.Thread(target=work, name="gui-update-check", daemon=True).start()
+        return True
 
     def size_now(self) -> tuple[int, int]:
         """界面窗口现在该多大：页面报过高度就用它报的，没报过用估计的。"""
@@ -1408,6 +1478,7 @@ def main(items: dict[str, tuple], extra: dict[str, tuple], release: bool = False
     srv = Server(Launcher(items, extra, release))
     srv.serve()
     write_lock(srv)
+    srv.start_update_check()                         # 后台查一眼有没有新版本（只读 GitHub 上的版本标签；设置里能关）
     how = open_window(srv.url)
     if how not in ("", "默认浏览器"):                 # 应用窗口会照上次的大小打开：等它出来以后改成小窗口（不挡着后面的事）
         threading.Thread(target=shrink_window, kwargs={"hint": f"127.0.0.1:{srv.port}", "say": print, "size": srv.size_now},

@@ -10,13 +10,16 @@ DEFAULTS: dict[str, Any] = {
     "stop_key": "F12",                 # 紧急停止键：F1～F12、PAUSE、END、HOME
     "keep_awake": True,                # 运行期间不让电脑自己睡眠（挂机用）
     "notify": True,                    # 跑完了、停下了，在 Windows 右下角弹一条通知、响一声
+    "update_check": True,              # 打开界面时自动去 GitHub 看一眼有没有新版本（只读版本标签，不下载；有新的只是提醒）。false = 不查
     "detail_output": False,            # 窗口里（界面的“详细输出”）写多细：False = 只写干了什么；True = 连点在哪个坐标、按了多少毫秒都写（log.txt 里永远是全的）
     # 自动跑的时候你自己动手点了模拟器：工具先停手，等你停够 quiet 秒再重新看画面接着来。on = 要不要这样；
     # match = 模拟器窗口的程序名或标题里带的字（MuMu 不用改；换了模拟器再改）。只看“模拟器窗口在最前面、鼠标在它里面、鼠标键按着”这三件事
     "hands": {"on": True, "quiet": 12, "match": ["mumu", "nemu"]},
     "logs": {"keep_shots": 0},         # 只留最近这么多次运行的截图（更早的只删图，文字记录留着）；0 = 不删。一局的截图有两三百兆
     "drill": {"guild_mark": "guild_cile", "guild_name": "慈乐之音"},
-    "limits": {"max_taps": 60, "max_seconds": 600, "unknown_timeout": 20, "wait_timeout": 90},
+    # unknown_timeout = 认不出的画面先等多少秒；还认不出就请你在模拟器里手动点过去（工具不碰），认出下一个画面接着跑；
+    # unknown_wait = 请你来点以后最多再等多少秒（默认 1800 = 半小时），到了还认不出才停。写 0 = 不等，和以前一样到 unknown_timeout 就停
+    "limits": {"max_taps": 60, "max_seconds": 600, "unknown_timeout": 20, "wait_timeout": 90, "unknown_wait": 1800},
     # 走几格再撤退：steps = 默认走几格；
     # pick = 开局三人怎么选："auto" 按规则挑（当成一支 3 个人的快攻队：输出、破防、强化、增益优先，坦克和治疗排最后；物理魔法不混）；
     #        也可以直接写三个名字，比如 ["望（解放者）", "纺希（吉奥·矶汉拿）", "千歌（夏日）"]（要先读过角色）；

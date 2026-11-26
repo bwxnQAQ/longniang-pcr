@@ -182,9 +182,14 @@ class PageBook:
         self.spec = spec
         self.title_thr: float = float(spec.get("title_thr", 0.40))
         self.titles: list[tuple[str, str, np.ndarray]] = []       # (页面 id, 中文名, 0/1 图)
+        # 有的标题好多种对话框都在用（比如就叫「确认」）：这种标题要连正文里的某一句也对上才算认识（need = 那一句的标记），
+        # 对不上照旧算“不认识的对话框”，由外面按老办法处理——不会因为认了一个「确认」，就把所有叫「确认」的框都当成它
+        self.title_need: dict[str, str] = {}
         for t in spec["titles"]:
             for k in t["keys"]:
                 self.titles.append((t["id"], t["name"], self.tmpl[k]))
+            if t.get("need"):
+                self.title_need[t["id"]] = str(t["need"])
         self.pages: list[PageDef] = []
         for p in spec["pages"]:
             groups = [[Anchor(a["key"], tuple(a["rect"]), a.get("mode", "gray"),
@@ -259,6 +264,10 @@ class PageBook:
                 return PageResult("unknown", "不认识的对话框", "unknown", 1.0 - best[0], busy, bar,
                                   note=f"「{best[2]}」和「{ranked[1][2]}」分不清")
             if best[0] <= self.title_thr:
+                need = self.title_need.get(best[1])
+                if need and not self.has_mark(norm, need):
+                    return PageResult("unknown", "不认识的对话框", "unknown", 1.0 - best[0], busy, bar,
+                                      note=f"标题像「{best[2]}」，但正文不是认识的那一句")
                 return PageResult(best[1], best[2], "dialog", 1.0 - best[0], busy, bar)
             if busy:
                 return PageResult("busy", "数据连接中", "page", 1.0, True, bar, wait=True)

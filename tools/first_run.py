@@ -23,6 +23,10 @@ from longniang_pcr.runlog import RunLog
 from longniang_pcr.vision.pages import PageBook, to_norm
 
 WANT_SIZE = (1920, 1080)
+# 游戏里要玩家自己改的一项设置（2026-11-26 用户让加的提醒；工具不去碰游戏的设置）
+JOIN_ANIM_TIP = ("游戏里有一项设置请你自己改一下（只用改一次，游戏会记住）：",
+                 "  黎明界迷宫的「角色加入动画」设成「不播放」——进到迷宫的地图以后，点右上角的「菜单」→「设定」→ 选「不播放」→「关闭」。",
+                 "  开着的话每加入一名角色都要多播一段动画，既慢，那段画面工具也不一定认得出来。")
 
 
 def flag_path():
@@ -182,6 +186,10 @@ def main() -> int:
         log.close()
         return 1
     say("  ✓ 前三步都行，工具可以用了。" + ("" if checks["env"].get("ocr") else "（读字的组件没装好那一条，建议先处理。）"))
+    say("")
+    for line in JOIN_ANIM_TIP:
+        say("  " + line)
+    say("")
     say("  [4/4] 扫描角色：把你有的角色读一遍，再去资料站更新名单和头像（七八分钟）。编队认人靠它；以后抽到新角色，在界面上点「扫描角色」再来一次。")
     scan = None
     if not args.no_scan:

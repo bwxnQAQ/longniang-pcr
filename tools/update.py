@@ -1,6 +1,9 @@
 """检查更新：去 GitHub 看有没有新版本，有的话下载、换上，然后重新打开界面。
 
-- 只在你点了「检查更新」的时候才联网；只连 GitHub（api.github.com 查版本，下载会被它带到 codeload.github.com），只认 REPO 这一个仓库。
+- 下载和更换只在你点了「检查更新」（或者界面上那条新版本提醒里的「更新」）的时候做；只连 GitHub（api.github.com 查版本，
+  下载会被它带到 codeload.github.com），只认 REPO 这一个仓库。
+  另外，打开界面时后台会自动查一次有没有新版本（tools/gui.py 的 check_new_version：只读版本标签，不下载、不换；
+  config/settings.json 里写 "update_check": false 可以关）。
 - 版本看的是仓库里的标签（v1.0、v1.0.1 ……），取最大的那个和本机的 longniang_pcr.__version__ 比。
 - 换的只是程序本身：龙娘pcr.exe、README 这些最外层的文件，longniang_pcr、tools、assets、data 这几个文件夹里随版本发的文件。
   你的东西不动：config/settings.json、data/learned、logs、排查包、tools/dev。

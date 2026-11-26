@@ -151,6 +151,14 @@
    "keys": [
     "title_dlg_relic_effect_0"
    ]
+  },
+  {
+   "id": "dlg_no_reward",
+   "name": "确认（无法获得报酬）",
+   "keys": [
+    "title_dlg_no_reward_0"
+   ],
+   "need": "notice_noreward"
   }
  ],
  "pages": [
@@ -349,6 +357,17 @@
       ],
       "thr": 0.8,
       "search": 6
+     },
+     {
+      "key": "win_items",
+      "rect": [
+       590,
+       184,
+       100,
+       30
+      ],
+      "thr": 0.8,
+      "search": 6
      }
     ],
     [
@@ -486,24 +505,28 @@
    "anchors": [
     [
      {
-      "key": "battle_btn_a",
+      "key": "battle_glass",
       "rect": [
-       18,
-       606,
-       84,
-       88
+       1010,
+       19,
+       28,
+       26
       ],
-      "thr": 0.75
-     },
+      "thr": 0.8,
+      "search": 6
+     }
+    ],
+    [
      {
-      "key": "battle_btn_b",
+      "key": "battle_menu",
       "rect": [
-       18,
-       606,
-       84,
-       88
+       1172,
+       22,
+       58,
+       26
       ],
-      "thr": 0.75
+      "thr": 0.8,
+      "search": 6
      }
     ]
    ]
@@ -2763,6 +2786,58 @@
     720
    ],
    "thr": 0.7
+  },
+  {
+   "key": "ev_slot2",
+   "name": "老虎机（再较量一次）",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "ev_janken",
+   "name": "石头剪刀布",
+   "rect": [
+    410,
+    102,
+    460,
+    34
+   ],
+   "region": [
+    400,
+    94,
+    480,
+    50
+   ],
+   "thr": 0.8
+  },
+  {
+   "key": "notice_noreward",
+   "name": "无法获得报酬。",
+   "rect": [
+    558,
+    342,
+    154,
+    30
+   ],
+   "region": [
+    538,
+    330,
+    194,
+    54
+   ],
+   "mode": "dark",
+   "thr": 0.8
   }
  ],
  "regions": {

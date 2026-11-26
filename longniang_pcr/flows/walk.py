@@ -94,6 +94,7 @@ BOX.update({
     "chest.ok": (540, 622, 200, 34),              # 宝箱开封结果的「确认」
     "chest.open": (560, 470, 260, 60),            # 宝箱开封结果：宝箱还没翻开时，点对话框下半截的空白处翻开
     "daychange.ok": (540, 474, 200, 40),          # 日期变更的「确认」（2026-11-24 真机截图上量的：按钮 503～775 × 463～527）
+    "notice.ok": (550, 478, 180, 34),             # 只有一个「确认」的提示框（“无法获得报酬。”）：按钮和购买完毕的「确认」在同一个位置
 })
 OUTSIDE = ("lab_home", "home", "adventure", "guild_select", "dlg_guild_confirm", "dlg_daychange")     # 还没进到一局里面的页面
 
@@ -127,12 +128,17 @@ MOVE_KEYS = ["move_normal", "move_extreme", "move_mark", "move_relic", "move_eve
 MOVE_NAMES = {"normal": "战斗格子（普通）", "extreme": "战斗格子（极难）", "mark": "连结印记格子", "relic": "迷宫遗物格子",
               "event": "事件格子", "shop": "商店格子", "boss": "首领战格子"}
 PICK_KEYS = ["pick_0", "pick_1", "pick_2", "pick_3"]
-EVENT_KEYS = ["ev_arena", "ev_lost", "ev_box", "ev_tablet", "ev_guild_office", "ev_venue", "ev_picnic", "ev_picnic2"]
+EVENT_KEYS = ["ev_arena", "ev_lost", "ev_box", "ev_tablet", "ev_guild_office", "ev_venue", "ev_picnic", "ev_picnic2", "ev_slot2", "ev_janken"]
 EVENT_NAMES = {"arena": "斗技场", "lost": "迷路", "box": "箱子", "tablet": "石板", "guild_office": "公会管理协会",
                "venue": "活动会场出现了魔物（纯）",       # 2026-11-19 真机上第一次见：右边是“纯成为伙伴 + 全体随机印记 ×2～4”，用户定的选纯
                "picnic": "郊游做料理",                    # 2026-11-24 真机上第一次见：只有一个选项（50% 概率进入下一个事件）
-               "picnic2": "郊游做料理（做好了）"}          # 做成了：左边收手拿“随机职能的印记 ×2”，右边接着做（50% 概率再进下一个事件）。事件表里定的：收手
-EVENT_OPTIONS = {"arena": 2, "lost": 2, "box": 2, "tablet": 3, "guild_office": 2, "venue": 2, "picnic": 1, "picnic2": 2}
+               "picnic2": "郊游做料理（做好了）",          # 做成了：左边收手拿“随机职能的印记 ×2”，右边接着做（50% 概率再进下一个事件）。事件表里定的：收手
+               # 2026-11-26 用户发来截图：标题「再较量一次！」，左边“挑战结束”，右边“50% 概率获得阿尔法金币 ×4000 并进入下一个事件”（消耗 2000）。
+               # 对照事件表应该是老虎机赢了第一把以后的第二步（它的第一步国服长什么样还没见过）。用户定的：保持选左边（不花金币）。
+               # 选了左边会弹一个「确认」框“无法获得报酬。”——见主循环里的 dlg_no_reward
+               "slot2": "再较量一次（押金币）",
+               "janken": "石头剪刀布"}                    # 2026-11-26 玩家排查包里第一次见：三项一样（赢了 3000 金币、输了 1000），选哪个都行
+EVENT_OPTIONS = {"arena": 2, "lost": 2, "box": 2, "tablet": 3, "guild_office": 2, "venue": 2, "picnic": 1, "picnic2": 2, "slot2": 2, "janken": 3}
 # 公会管理协会：给出一组两种职能，二选一。计划里定的选法（每组里选哪个）：
 #   坦克 / 治疗 → 治疗（队里只有 1 名坦克时选坦克——这条要能读出队伍职能才做得了，留到阶段 3）
 #   攻击 / 破坏 → 破坏；辅助 / 增益 → 增益；减益 / 干扰 → 减益
@@ -1037,7 +1043,8 @@ class Walk:
         2026-11-25 有用户：切窗口时点到了模拟器，我让了 12 秒，接着还按原来排到一半的编队计划走，
         一看成员栏是空的，就报“队伍编组里一个能上场的角色都没有”停了。现在让过手以后编队从头来（重新看名单、重新排）。"""
         h = getattr(self.r, "hands", None)
-        n = len(getattr(h, "waits", None) or ())
+        # 两种都算“画面被你动过”：你自己点了模拟器、我让过手；有个画面我认不出来、请你手动点过去的（runner.hand_asks）
+        n = len(getattr(h, "waits", None) or ()) + len(getattr(self.r, "hand_asks", None) or ())
         if n == self.hands_seen:
             return
         self.hands_seen = n
@@ -2727,6 +2734,10 @@ class Walk:
                 self._on_bought(s)
             elif page == "dlg_refresh" and self.seen_pick3:
                 self._on_refresh(s)
+            elif page == "dlg_no_reward" and self.seen_pick3:
+                # 标题「确认」、正文只有一句“无法获得报酬。”、下面一个「确认」的提示框（事件里选了“挑战结束”以后弹的）。
+                # 两样都对上页面库才会报这个名字；别的叫「确认」的框照旧算不认识的对话框，不走这里
+                self._tap_wait(s, BOX["notice.ok"], "确认（提示“无法获得报酬”，只有这一个按钮）")
             elif page == "dlg_shop_exit" and self.seen_pick3:
                 if self._tap_wait(s, BOX["shop_exit.ok"], "确认（退出商店）") != "changed":
                     self.shop = None

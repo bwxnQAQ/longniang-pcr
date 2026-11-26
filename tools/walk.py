@@ -319,8 +319,11 @@ def main() -> int:
     n = 30 if args.full else steps                   # 一整局是 31 格，第 31 格是最终首领（不打）
     # 按职能编队要翻页签、换人，一场战斗比原来多点十几下；打输了还会重打，所以每格的额度放宽
     limits = Limits(max_taps=(60 + 55 * n) * rounds, max_seconds=(420.0 + 320.0 * n) * rounds,
-                    unknown_timeout=float(lim.get("unknown_timeout", 20)), wait_timeout=float(lim.get("wait_timeout", 90)))
+                    unknown_timeout=float(lim.get("unknown_timeout", 20)), wait_timeout=float(lim.get("wait_timeout", 90)),
+                    unknown_wait=max(0.0, float(lim.get("unknown_wait", 1800))))
     runner = Runner(dev, book, human, log, stop, step_mode=not args.auto, limits=limits)
+    if bool(cfg.get("notify", True)):                # 认不出画面、要你手动点过去的时候，右下角叫一声
+        runner.on_ask = lambda text: NT.toast("龙娘pcr · 等你点一下", text)
     # 挂机（2026-11-24）：换日、连接出错会把游戏退回标题画面——认得出来就自己走回迷宫接着打；连续打几局；运行期间不让电脑睡过去
     recover_on = (bool(wk.get("recover", False)) or args.recover) and not args.no_recover
     recover_blind = recover_on and not ocr.available()      # 读字的组件不在：看不见“密码 / 验证码 / 支付”这些字，就不许它往回走
@@ -637,6 +640,9 @@ def main() -> int:
             log.event("hands", what="end", hits=hands.hits, waits=list(hands.waits), seen_emulator=hands.seen_emulator, own_seen=getattr(hands, "own_seen", 0))
             if hands.waits:
                 log.say(f"  这一次运行里你自己动手点过模拟器，我停手让了 {len(hands.waits)} 次，一共 {sum(hands.waits):.0f} 秒。")
+        if runner.hand_asks:
+            log.say(f"  这一次运行里有 {len(runner.hand_asks)} 个画面我认不出来、是你手动点过去的（一共等了 {sum(runner.hand_asks):.0f} 秒）。截图在记录里，把排查包发给我就能补上。")
+            log.event("ask_hand", what="end", waits=list(runner.hand_asks))
         if runner.recovery.log:
             log.say(f"  这一次运行里从游戏外面走回迷宫 {len(runner.recovery.log)} 次：{'；'.join(runner.recovery.log)}。")
         watcher.close()

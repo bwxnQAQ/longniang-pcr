@@ -70,13 +70,11 @@ SORT_RADIO = (103, 303)                 # 「分类」里“显示顺序”第�
 
 
 SORT_ICONS = ("sort_icon", "sort_icon_up")     # 三条横线有两种画法：“从高到低”上长下短，“从低到高”上短下长
-SORT_ICON_AT = {False: (1041, 104), True: (1041, 197)}        # 两种画法都没对上时按老位置算：普通战 / 首领战（多一排页签，低 93 像素）
-
 
 def sort_state(book: PageBook, img: np.ndarray) -> tuple[str | None, tuple[float, float, float, float] | None, float]:
     """队伍编组右上角的排序按钮。返回（状态, 按钮上能点的一块, “等级”两个字的相似度）：
-    状态 "lv" = 现在按等级排；"other" = 按别的排；None = 库里没有这几张模板（老的页面库）。
-    注意：按别的排不一定就认不出卡片——比如「编组顺序」，卡片左上角写的还是“等级”；「战力」这类才会换成自己的数。"""
+    状态 "lv" = 现在按等级排；"other" = 按别的排；None = 没找到这个按钮（被别的东西盖着、对话框还在变，或者是老的页面库）——那就什么都不做。
+    按钮在哪是靠那三条横线找的（普通战 y≈104，首领战多一排页签、低 93 像素），不按固定位置猜：猜错了会点到别的东西上。"""
     if "sort_lv" not in book.tmpl:
         return None, None, 0.0
     best = None
@@ -86,10 +84,8 @@ def sort_state(book: PageBook, img: np.ndarray) -> tuple[str | None, tuple[float
             if score >= float(book.marks[key].get("thr", 0.8)) and (best is None or score > best[0]):
                 best = (score, x, y, w, h)
     if best is None:
-        x, y = SORT_ICON_AT[bool(boss_tab(img))]
-        w, h = 32, 28
-    else:
-        _, x, y, w, h = best
+        return None, None, 0.0
+    _, x, y, w, h = best
     gray = cv2.cvtColor(to_norm(img), cv2.COLOR_BGR2GRAY)
     t = book.tmpl["sort_lv"]
     x0, y0 = max(0, x - 112), max(0, y - 8)

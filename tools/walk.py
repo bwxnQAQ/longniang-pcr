@@ -460,7 +460,7 @@ def main() -> int:
                 log.say(f"  公会：{guild}。")
             flow = Walk(runner, GD.mark_of(guild), guild, steps=steps, pick=pick,
                         event_defaults=events, battle_timeout=float(wk.get("battle_timeout", 300)), survey=survey,
-                        unknown_event=str(wk.get("unknown_event", "first")),
+                        unknown_event=str(wk.get("unknown_event", "first")), slot_bet=bool(wk.get("slot_bet", False)),
                         boss=boss,                   # 只有连续刷 + 使用门票才是 "all"（见 boss_mode）；黎明界迷宫勾了门票的话，走到最终首领跟前再由 _final_gate 改成 "all"
                         loot=loot, wins=wins, keep_passes=int(fm.get("keep_passes", 0) or 0),
                         teams_mid=int(wk.get("boss_teams_mid", 1)), teams_final=int(wk.get("boss_teams_final", 3)),

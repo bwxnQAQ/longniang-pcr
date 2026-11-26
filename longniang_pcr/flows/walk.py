@@ -138,7 +138,7 @@ EVENT_NAMES = {"arena": "斗技场", "lost": "迷路", "box": "箱子", "tablet"
                "picnic2": "郊游做料理（做好了）",          # 做成了：左边收手拿“随机职能的印记 ×2”，右边接着做（50% 概率再进下一个事件）。事件表里定的：收手
                # 2026-11-26 用户发来截图：标题「再较量一次！」，左边“挑战结束”，右边“50% 概率获得阿尔法金币 ×4000 并进入下一个事件”（消耗 2000）。
                # 对照事件表应该是老虎机赢了第一把以后的第二步（它的第一步国服长什么样还没见过）。
-               # 18:38 用户说保持选左边；19:28 改主意：押（见 _slot_pick——只押“消耗 2000”这一步、一个事件格里只押一次、金币要够）。
+               # 18:38 用户说保持选左边；19:28 改成押；21:30 看了金币是怎么进出的以后定下来：不押（见 _slot_pick；押的那套留在 walk.slot_bet 后面）。
                # 选了左边会弹一个「确认」框“无法获得报酬。”——见主循环里的 dlg_no_reward；押完以后出什么还没见过
                "slot2": "再较量一次（押金币）",
                # 老虎机的第一步「是老虎机！要挑战吗？」：只有一个选项（50% 概率获得阿尔法金币 ×2000 并进入下一个事件），不花钱。
@@ -258,7 +258,7 @@ class Walk:
     def __init__(self, runner: Runner, guild_mark: str = "guild_cile", guild_name: str = "慈乐之音",
                  steps: int = 3, pick: tuple[int, ...] = (0, 7, 11), event_defaults: dict[str, int] | None = None,
                  battle_timeout: float = 300.0, survey: bool = True, edge_thr: float = RT.EDGE_THR,
-                 unknown_event: str = "ask", boss: str = "stop", teams_mid: int = 1, teams_final: int = 3,
+                 unknown_event: str = "ask", boss: str = "stop", teams_mid: int = 1, teams_final: int = 3, slot_bet: bool = False,
                  route_values: dict | None = None, team_mode: str = "order", defeat_retries: int = 2,
                  counters: dict | None = None, chars: "CH.CharBook | None" = None,
                  shop_buy: bool = True, shop_rate: float = ST.SHOP_MAX_RATE, shop_refresh_max: int = 600,
@@ -387,6 +387,7 @@ class Walk:
         self.survey, self.edge_thr = survey, edge_thr
         self.route_values = dict(route_values or {})  # 每种格子值多少分（覆盖 plan.ROUTE_VALUES）；极难数相同的路线之间按它挑
         self.unknown_event = unknown_event           # 没见过的事件 / 认不出的选项："ask" 交给你，"first" 先选第 1 项
+        self.slot_bet = bool(slot_bet)               # 「再较量一次！」押不押金币：默认不押（用户 2026-11-26 21:30 定的）；设置里 walk.slot_bet = true 才押
         self.boss = boss                             # "stop" 见到首领就撤退；"mid" 打区域 3 的首领；"all" 最终首领也打
         self.teams_mid, self.teams_final = max(1, min(3, teams_mid)), max(1, min(3, teams_final))
         if self.tier.boss_mid_teams is not None:     # 第四档：区域 3 首领一开始就多编一队
@@ -1104,24 +1105,21 @@ class Walk:
         self.r.log.event("hands_resync", redo=redo)
 
     def _fix_sort(self, s: Seen) -> bool:
-        """队伍编组右上角的排序不是「等级」、卡片上的“等级”两个字也因此没了：点开「分类」把它换回来。动了手返回 True（外面重新看画面）。
+        """队伍编组右上角的排序不是「等级」：点开「分类」把它换回来。动了手返回 True（外面重新看画面）。
 
-        工具找名单里的卡片，靠的是每张卡左上角的“等级”两个字。排序选了别的（战力、★数、攻击力……十几种），那里写的就不是这两个字了，
+        工具找名单里的卡片，靠的是每张卡左上角的“等级”两个字。排序选了别的（战力、★数、攻击力……十几种），那里写的可能就不是这两个字了，
         一张卡都找不到（2026-11-26 玩家排查包：排序是「战力」，报“队伍编组里一个能上场的角色都没有”停了）。
-        用户定的：不去认别的写法，工具自己把排序换回「等级」。"""
+        用户定的：不去认别的写法，**只要不是等级就一律换回「等级」**（21:30；有的排序——比如「编组顺序」——卡片上还是“等级”，也一样换，不分情况）。"""
         r = self.r
         state, box, lv = TM.sort_state(r.book, s.img)
         if state != "other" or box is None:
-            return False
-        # 按别的排、可卡片上写的还是“等级”（比如「编组顺序」）：认得出来，不用动。名单里没头像（空的、还没显示出来）也不动
-        if TM.card_labels(r.book, s.img) or not TM.list_has_faces(s.img):
             return False
         if self.sort_tries >= 2:
             r.log.shot(s.img, "sort_stuck", png=True)
             raise Halt("队伍编组右上角的排序不是「等级」，我点开改了 2 次都没改过来——请手动把它改成「等级」再开始")
         self.sort_tries += 1
         r.log.shot(s.img, "sort_not_level", png=True)
-        r.log.say("      队伍编组右上角的排序不是「等级」（这样卡片左上角写的不是“等级”，我认不出卡片）：点开排序，改回「等级」。")
+        r.log.say("      队伍编组右上角的排序不是「等级」（我认卡片靠的是卡片左上角的“等级”两个字）：点开排序，改回「等级」。")
         r.log.event("sort_fix", what="open", n=self.sort_tries, lv=round(lv, 3))
         if r.tap(s, box, "排序（点开「分类」，把显示顺序改回「等级」）") != "changed":
             r.wait_leave(s.page, 4.0 * self.patience + 2.0)
@@ -2596,8 +2594,12 @@ class Walk:
         return None
 
     def _slot_pick(self, s: Seen) -> tuple[int, str]:
-        """「再较量一次！」选哪边。用户 2026-11-26 19:28 定的：押。只押“消耗 2000 赌 4000”这一步、一个事件格里只押一次，
-        而且手里的金币够；别的情况（已经押过、按钮上不是 2000、金币不够或者没读出来）都选左边“挑战结束”。"""
+        """「再较量一次！」选哪边。默认选左边“挑战结束”，不押——用户 2026-11-26 21:30 定的（“第二次不押”）：
+        第一步赢的 2000 是当场进口袋的，押的 2000 要从口袋里掏，输了就把刚赢的赔回去。
+        设置里 walk.slot_bet = true 才押（19:28 做的那套留着）：只押“消耗 2000 赌 4000”这一步、一个事件格里只押一次，而且手里的金币够；
+        别的情况（已经押过、按钮上不是 2000、金币不够或者没读出来）都选左边。"""
+        if not self.slot_bet:
+            return 1, "到这里收手，不押金币"
         ok, whole, digit = slot_cost_is_2000(self.r.book, s.img)
         coins = self.hud.get("coins")
         if self.slot_bets >= 1:

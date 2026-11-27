@@ -407,7 +407,7 @@ def main() -> int:
     dmg = DM.DamageBook(paths.PROJECT_ROOT / "data" / "learned" / "damage.json") if team_mode == "role" else None
     report_on = (bool(wk.get("damage_report", False)) or args.report) and dmg is not None and not args.no_report
     if dmg is not None:
-        chars.rates = dmg.rates()
+        chars.rates = dmg.scene_history("normal", persist=False).rates()
         log.say("  真机伤害：" + ("每场打赢以后点开「伤害报告」看每个人打了多少，记下来；输出角色（攻击 / 破防）里谁伤害高就调高比重，增益、坦克、治疗不参加比较。"
                               "首领战也看；时间到了没打完（伤害不够）输的那一场也看，下一次照着换人。" + ("" if ocr.available() else "（没有读字的组件：数字读不了，按每个人那根条的长度算占比。）")
                               if report_on else "这一次不看伤害报告（没勾）。")

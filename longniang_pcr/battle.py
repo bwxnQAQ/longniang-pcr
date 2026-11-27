@@ -155,7 +155,7 @@ def _code_kind(code: Any) -> str:
     return "ub" if code in ("ub", "sp_ub") else "attack" if code == 1 else "skill"
 
 
-UNLISTED_RATIOS = {"hp": 0.625, "atk": 0.616, "matk": 0.616, "pdef": 0.745, "mdef": 0.739, "crit": 0.648}
+UNLISTED_RATIOS = {"hp": 0.625, "atk": 0.616, "matk": 0.616, "pdef": 0.745, "mdef": 0.739, "crit": 0.648, "mcrit": 0.648}
 UNLISTED_MEASURED = {
     "大和": {"hp": 92370, "atk": 26951, "matk": 20, "pdef": 2086, "mdef": 1859, "crit": 626, "mcrit": 0,
            "dodge": 21, "whp": 890, "wtp": 233},

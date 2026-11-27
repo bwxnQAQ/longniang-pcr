@@ -4,17 +4,19 @@ from collections import Counter
 from pathlib import Path
 
 from longniang_pcr import chars, damage, recruit, wiki
+from longniang_pcr.vision.enemy import load_counters
 
 
 def main():
     root = Path.cwd()
     learned = root / "data/learned"
+    counters = load_counters(root / "data").get("enemies", {})
     book = chars.CharBook(learned / "portraits.json", chars.load_table(root / "data"))
     wiki.attach(book, learned)
     owned = book.owned()
     if not owned:
         raise SystemExit("缺少账号名单")
-    road_rates = damage.DamageBook(learned / "damage.json").rates()
+    road_rates = damage.DamageBook(learned / "damage.json").scene_history("normal", persist=False).rates()
     boss_rates = damage.DamageBook(learned / "damage_boss.json").rates()
     skipped, cases = Counter(), []
     for log in sorted((root / "logs/runs").glob("*/events.jsonl")):
@@ -49,7 +51,8 @@ def main():
                     lineup = [(n, *p) for n, p in zip(team, pairs)]
                     offers = [(n, *p) for n, p in zip(names, cards)]
                     original = e.get("original_pick", e["pick"])
-                    selected, scores = recruit.trial_recruit(book, owned, lineup, offers, original, road_rates, boss_rates)
+                    guide = counters.get(e.get("boss_guide"))
+                    selected, scores = recruit.trial_recruit(book, owned, lineup, offers, original, road_rates, boss_rates, guide, e.get("eligible"))
                     case.update(original_pick=original, trial_pick=selected, **scores)
                     cases.append(case)
     print(json.dumps(dict(skipped=skipped, cases=cases)))

@@ -856,7 +856,8 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
                    attr_order: Sequence[str] = MARK_ORDER, tags: Sequence[frozenset] | None = None,
                    atks: Sequence[str | None] | None = None, side: str | None = None,
                    powers: Sequence[float] | None = None, wants: dict[str, Any] | None = None,
-                   heals: Sequence[float] | None = None, unlisted: Sequence[bool] | None = None) -> tuple[int, str]:
+                   heals: Sequence[float] | None = None, unlisted: Sequence[bool] | None = None,
+                   eligible: Sequence[int] | None = None) -> tuple[int, str]:
     """战斗后三选一。cands = [(职能, 属性), …]；tags = 每个人的特点、atks = 物理还是魔法（认出名字才有）；
     heals = 每个人会不会给全队回血（≥1 算有奶：后面的首领要奶时，有奶的强力角色和纯治疗一样算数）；
     side = 现在在凑物理队还是法队（roster_side）；powers = 每个人的强度档；
@@ -889,8 +890,10 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
         penalty = 4.0 if unlisted and unlisted[i] else 0.0
         return ((want.index(role) if role in want else 99) - boost(i) + penalty, off(i), -powers[i], attr_order.index(attr) if attr in attr_order else 9, i)
 
-    best = min(range(len(cands)), key=rank)
+    best = min(range(len(cands)) if eligible is None else eligible, key=rank)
     role, attr = cands[best]
+    if role is None and eligible is not None:
+        return best, "按首领需要的效果选择"
     if role is None:
         return 0, "三个人的职能都没认出来，选最左边"
     lack = have.get(role, 0)

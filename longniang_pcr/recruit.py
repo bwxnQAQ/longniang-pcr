@@ -12,8 +12,8 @@ def unit(book, owned, rates, name, role, attr):
                    unlisted=name not in owned)
 
 
-def compare(team, offers, pick, profile, targets):
-    base = st.team_score(team, profile, targets=targets)
+def compare(team, offers, pick, profile, targets, tweak=None, eligible=None):
+    base = st.team_score(team, profile, tweak=tweak, targets=targets)
     rows = []
     for candidate in offers:
         gain, replaced = 0.0, None
@@ -21,16 +21,17 @@ def compare(team, offers, pick, profile, targets):
             trial = team[:i] + [candidate] + team[i+1:]
             if st.has_dup(trial):
                 continue
-            delta = round(st.team_score(trial, profile, targets=targets) - base, 3)
+            delta = round(st.team_score(trial, profile, tweak=tweak, targets=targets) - base, 3)
             if delta > gain:
                 gain, replaced = delta, member.name
         rows.append(dict(name=candidate.name, outside=candidate.unlisted, gain=gain, out=replaced))
-    best = max(row["gain"] for row in rows)
-    winners = [i for i, row in enumerate(rows) if row["gain"] == best]
+    indices = range(len(rows)) if eligible is None else eligible
+    best = max(rows[i]["gain"] for i in indices)
+    winners = [i for i in indices if rows[i]["gain"] == best]
     return dict(base=round(base, 3), rows=rows, best=winners, agrees=pick in winners)
 
 
-def trial_recruit(book, owned, team, offers, pick, road_rates, boss_rates):
+def trial_recruit(book, owned, team, offers, pick, road_rates, boss_rates, boss=None, eligible=None):
     """两个场景共同首选一人时才改选。"""
     if not owned or len(team) != 5 or len(offers) != 3 or not all(all(card) for card in [*team, *offers]):
         return pick, {}
@@ -41,7 +42,8 @@ def trial_recruit(book, owned, team, offers, pick, road_rates, boss_rates):
                                          ("boss", "burst", "single", boss_rates)):
         lineup = [unit(book, owned, rates, *card) for card in team]
         candidates = [unit(book, owned, rates, *card) for card in offers]
-        results[key] = compare(lineup, candidates, pick, profile, targets)
+        tweak = boss if key == "boss" else None
+        results[key] = compare(lineup, candidates, pick, profile, (tweak or {}).get("targets") or targets, tweak, eligible)
     winners = set(results["road"]["best"]) & set(results["boss"]["best"])
     if len(winners) == 1 and pick not in winners:
         return winners.pop(), results

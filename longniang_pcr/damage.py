@@ -66,20 +66,21 @@ class DamageBook:
         return weights
 
     def boss_history(self) -> DamageBook | None:
-        if not self.path:
-            return None
-        path = self.path.with_name("damage_boss.json")
+        return self.scene_history("boss") if self.path else None
+
+    def scene_history(self, kind: str, *, persist: bool = True) -> DamageBook:
+        path = self.path.with_name(f"damage_{kind}.json") if self.path else None
         book = DamageBook(path)
-        if not path.exists():
+        if not path or not path.exists():
             for fight in self.fights:
-                if fight.get("battle") != "boss":
+                if fight.get("battle") != kind:
                     continue
                 info = dict(fight)
                 team, roles, damage = (info.pop(key) for key in ("team", "roles", "damage"))
                 predicted = info.pop("sim_shares", None)
                 info.pop("shares", None)
                 book.record(team, roles, damage, predicted, **info)
-            if not book.save():
+            if path and persist and not book.save():
                 raise OSError(f"Cannot initialize {path}")
         return book
 

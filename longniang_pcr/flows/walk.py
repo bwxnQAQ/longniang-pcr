@@ -316,10 +316,14 @@ class Walk:
         # 真机伤害（2026-11-24 用户定的：测试的时候每场打完看一下输出，输出角色谁伤害高就调高比重）。没给 = 不看
         self.dmg = damage
         self.report_teams = {}
+        self.boss_lineups = {}
+        self.retry_clear_tabs = []
+        self.retry_clear_steps = 0
         self.report_attempts = {}
         self.report_row = 0
         self.report_waits = 0
-        self.boss_dmg = damage.boss_history() if damage is not None else None
+        self.boss_dmg = damage.scene_history("boss") if damage is not None else None
+        self.road_dmg = damage.scene_history("normal") if damage is not None else None
         self.report_on = bool(damage_report) and damage is not None
         self.report_done = True                      # 这一场的伤害报告看过了没有（开打时置回 False）
         self.faces: list[np.ndarray | None] = []     # 开打前成员栏里每个位置的头像（打完去伤害报告里找同一张脸）
@@ -373,6 +377,8 @@ class Walk:
         self.tweak: dict[str, Any] | None = None     # 对策表里这个敌人的那一条
         self.enemy_done, self.enemy_tries = False, 0
         self.chars: CH.CharBook = chars if chars is not None else CH.CharBook()      # 头像库：头像 → 名字（没给就只在这一趟里记）
+        if self.road_dmg is not None:
+            self.chars.rates = self.road_dmg.rates()
         self.join_seen: list | None = None           # 这一次「角色加入」已经读过了（存的是读到的名字）
         self.join_tries = 0
         self.recruit_team = []
@@ -1091,6 +1097,7 @@ class Walk:
             self.eff_tank = False
             self.lost_how = None
             self.tries, self.hp_log = [], []
+            self.retry_clear_tabs.clear()
             self.targets = None
             self.recruit_team = []
             self.recruit_win = False
@@ -1649,12 +1656,15 @@ class Walk:
             sides = (tweak or {}).get("sides") or []
             side = sides[boss - 1] if is_boss and 0 < boss <= len(sides) else None        # 对策表里写了这一队该是物理队还是法队
             # 这一次怎么打看前面是怎么输的：一个个倒 → 加坦克；一起崩 → 加治疗；时间到 → 保命的留着、输出换一批（加过的不再拿掉）
-            profile, tweak2, avoid, why_retry = ST.plan_retry(self.battle_kind, self.tries, tweak)
+            tries = self.tries
+            if is_boss:
+                tries = [{**t, **t["by_team"][boss]} for t in self.tries if boss in t.get("by_team", {})]
+            profile, tweak2, avoid, why_retry = ST.plan_retry(self.battle_kind, tries, tweak)
             if self.run_wins:
                 tweak2["proven"] = dict(self.run_wins)
             if self.battle_kind == "extreme" and self.tweak:      # 2026-11-27 用户定的：极难关按攻略来（和攻略点名的要求每差一个都重扣；名单里做不到的不算）
                 tweak2["strict"] = True
-            plan, swapped = ST.choose_new_team(units, self.battle_kind, self.weak, self.attempt, lost=[t.get("team") or [] for t in self.tries],
+            plan, swapped = ST.choose_new_team(units, self.battle_kind, self.weak, self.attempt, lost=[t.get("team") or [] for t in tries],
                                                tweak=tweak2, side=side, targets=self.targets, profile=profile, avoid=avoid)
             if swapped:
                 why_retry = (why_retry + "；" if why_retry else "") + "排出来的队和输过的那一队一模一样，换了人再排"
@@ -1703,6 +1713,11 @@ class Walk:
             self.last_front = (sub0.name, sub0.tough) if sub0 is not None else None        # 这一场是谁在顶坦克的位置（没有坦克、拿肉的前排顶时才有）
             # 这一队带着哪种保命的人（打输了要用：已经带了还那样倒，下一次就不能只是“带一个”）
             self.last_had = (["tank"] if ST.tank_in_front(plan.team) or sub0 is not None else []) + (["heal"] if any(ST.can_heal(u) for u in plan.team) else [])
+            if boss == 1:
+                self.boss_lineups.clear()
+            if is_boss:
+                self.boss_lineups[boss] = {"team": [u.name for u in plan.team if u.name], "had": list(self.last_had),
+                                           "front_tough": sub0.tough if sub0 else None}
             named = sum(1 for u in units if u.name)
             vs = f"打{self.enemy}，" if self.enemy else ""
             side_cn = (f"，{ST.SIDE_CN[plan.side]}" if plan.side else "") + (f"；{ST.TARGETS_CN[self.targets]}" if self.targets in ST.TARGETS_CN else "")
@@ -2206,7 +2221,7 @@ class Walk:
         owned = self.chars.owned()
         if owned:
             mods["unlisted"] = sorted({name for name in names if name and name not in owned})
-        damage_book = self.boss_dmg if self.battle_kind == "boss" else self.dmg
+        damage_book = self.boss_dmg if self.battle_kind == "boss" else self.road_dmg
         sims = damage_book.sims() if damage_book is not None else {}
         if self.battle_kind == "extreme":
             sims = self.dmg.extreme_weights(self.enemy)["sim"] if self.dmg is not None else {}
@@ -2369,11 +2384,22 @@ class Walk:
                 r.log.say("      BOSS 专项伤害记录未保存；原伤害记录不受影响。")
             elif boss_result["full"]:
                 r.log.say("      已单独学习这一队的 BOSS 伤害，供后续首领编队使用。")
-        self.chars.rates = self.dmg.rates()
+        if self.battle_kind == "normal" and self.road_dmg is not None:
+            res = self.road_dmg.record([n or "?/?" for n in names], roles, damage, sim_share,
+                                       battle="normal", enemy=self.enemy, result=result, unit=rep.unit)
+            if self.road_dmg.path and not self.road_dmg.save():
+                r.log.say("      道中专项记录未保存，本场报告仍在总记录中。")
+            self.chars.rates = self.road_dmg.rates()
         r.log.event("damage_report", ok=bool(res["full"]), shot=shot, team=names, roles=roles, shares={n: round(v, 4) for n, v in res["shares"].items()},
                     sim_shares={n: round(v, 4) for n, v in (sim_share or {}).items()}, rate=res["rate"], sim=res["sim"], where=where, result=result,
                     **RP.as_event(rep))
         self.last_shares = dict(res["shares"]) if res["full"] else {}
+        if where == "defeat" and self.lost_how == "timeout" and not self.no_mech and self.tries and self.last_shares:
+            entry = self.tries[-1]
+            if self.battle_kind == "boss":
+                entry = entry.get("by_team", {}).get(self.report_row or 1)
+            if entry is not None:
+                entry["weak"], entry["strong"] = self._weak_dealers(role_map)
         if not res["full"]:
             r.log.say(f"      伤害报告：弹窗里有 {len(rep.rows) or len(rep.numbers)} 行，上场的 {len(names)} 个人里对上了 {sum(1 for d, n in zip(damage, names) if d is not None and n)} 个"
                       "——没对全，这一场只存截图和原始数字，不调比重。")
@@ -2392,18 +2418,18 @@ class Walk:
         if res["rate"]:
             r.log.say("        输出角色的比重：" + "、".join(f"{n} {a:g}→{b:g}" for n, (a, b) in res["rate"].items()) + "（增益、坦克、治疗不参加这个比较）")
 
-    def _weak_dealers(self) -> tuple[list[str], list[str]]:
+    def _weak_dealers(self, roles) -> tuple[list[str], list[str]]:
         """刚看的那张伤害报告里，哪几个输出角色打得少（下一次换掉）、谁打得多（留着）。只拿“该打输出的人”（攻击 / 破防）来比，
         增益、减益、坦克、治疗不看她自己打了多少。返回（打得少的, 打得多的）；报告没读全返回 ([], [])。"""
         shares = getattr(self, "last_shares", None) or {}
         if len(shares) < 2:
             return [], []
         even = 1.0 / len(shares)
-        dealers = [(n, v) for n, v in shares.items() if self.last_roles.get(n) in DM.DAMAGE_ROLES]
+        dealers = [(n, v) for n, v in shares.items() if roles.get(n) in DM.DAMAGE_ROLES]
         weak = [n for n, v in dealers if v < 0.6 * even]
         if not weak and len(dealers) >= 2:
             weak = [min(dealers, key=lambda z: z[1])[0]]
-        strong = [n for n, v in shares.items() if v >= 1.5 * even and n not in weak]
+        strong = [n for n, v in dealers if v >= 1.5 * even and n not in weak]
         return weak, strong
 
     def damage_lines(self, top: int = 40) -> list[str]:
@@ -2454,6 +2480,7 @@ class Walk:
             if say:
                 r.log.say(f"      这一场是{say}。")
             self.tries.append({"how": self.lost_how, "team": [n for n in self.last_team if "/" not in n], "had": list(self.last_had),
+                               "by_team": {i: dict(lineup) for i, lineup in self.boss_lineups.items()} if self.battle_kind == "boss" else {},
                                **({"front": self.last_front[0], "front_tough": self.last_front[1]} if self.last_front else {})})
             r.log.event("defeat_cause", how=self.lost_how, hp=hp, battle=self.battle_kind, attempt=self.attempt,
                         hp_log=[[t, v] for t, v in log[:: max(1, len(log) // 40)]])
@@ -2464,16 +2491,13 @@ class Walk:
                 self.boss_extra += 1                 # 最终首领：下一次多编一队。区域 3 首领第一、二档只用一队打（凹分要一队过），第三、四档输了可以多编
         if self.defeat_report:
             if self._damage_report(s, "defeat"):
-                weak, strong = self._weak_dealers() if self.lost_how == "timeout" and not self.no_mech else ([], [])
-                if self.tries and (weak or strong):
-                    self.tries[-1]["weak"], self.tries[-1]["strong"] = weak, strong
-                    sh = self.last_shares
-                    r.log.say("      伤害不够，看了伤害报告：" + ("、".join(f"{n}（{sh.get(n, 0) * 100:.0f}%）" for n in weak) + " 打得少，下一次换掉" if weak else "输出角色之间差不多")
-                              + ("；" + "、".join(f"{n}（{sh.get(n, 0) * 100:.0f}%）" for n in strong) + " 打得多，留着" if strong else "") + "。")
                 return
             self.defeat_report = False
         kind = KIND_CN.get(self.battle_kind, self.battle_kind) + (f"·{self.enemy}" if self.enemy else "")
         if self.attempt <= self._retries():
+            if self.battle_kind == "boss" and self._boss_teams() > 1:
+                self.retry_clear_tabs = [2, 3, 1]
+                self.retry_clear_steps = 0
             r.log.say(f"      这一场（{kind}）输了，已经打了 {self.attempt} 次。换一套队伍再打（最多再打 {self._retries() - self.attempt + 1} 次）。")
             self._tap_wait(s, self._defeat_box(s, "retry"), "重新挑战（换一套队伍）")
         else:
@@ -2485,6 +2509,9 @@ class Walk:
             self._tap_wait(s, self._defeat_box(s, "end"), "结束（不再打这一场）")
 
     def _on_team(self, s: Seen) -> None:
+        if self.retry_clear_tabs:
+            self._clear_retry_team(s)
+            return
         if self.team_mode == "role":
             self._on_team_role(s)
             return
@@ -2515,9 +2542,40 @@ class Walk:
                 self.fighting = True
                 r.wait_leave(s.page)
 
+    def _clear_retry_team(self, s: Seen) -> None:
+        """先释放后队占用的角色，依次确认三队为空，回到第一队后才开始选人。"""
+        self.retry_clear_steps += 1
+        if self.retry_clear_steps > 18:
+            raise Halt(f"重试前没能确认队伍 {self.retry_clear_tabs[0]} 已清空，请检查编队页面")
+        target = self.retry_clear_tabs[0]
+        current = TM.boss_tab(s.img)
+        if current and current != target:
+            self.r.tap(s, (TM.TAB_X[target - 1] - 24, 112, 48, 16), f"重排前切到队伍 {target}")
+        elif current == target:
+            members = [m for m in CD.member_cards(self.r.book, s.img) if m is not None]
+            if members:
+                self.r.tap(s, members[-1].tap_box, f"重排前释放队伍 {target} 的角色")
+            else:
+                self.retry_clear_tabs.pop(0)
+                self.retry_clear_steps = 0
+                self.r.log.event("retry_team_empty", team=target)
+                self.tb = None
+        self.r.pause(self.beat)
+
     def _on_choice3(self, s: Seen, what: str) -> None:
         r = self.r
         btns = r.book.find_all(s.img, "btn_choose")
+        role_reward = what == "角色加入奖励"
+        if role_reward and (len(btns) != 3 or any(abs(x + w / 2 - (271 + 370 * i)) > 90
+                                                   for i, (_, (x, y, w, h)) in enumerate(btns))):
+            self.choice_wait += 1
+            if self.choice_wait <= 6:
+                r.pause(0.5 * self.patience)
+            else:
+                self.choice_wait = 0
+                r.hand_over(s, "三个角色的选择按钮没读齐，请选择这次奖励角色")
+                r.wait_leave(s.page, 15.0)
+            return
         if not btns:
             self.choice_wait += 1                    # 页面刚出来时按钮还在飞进来：等一等再看
             if self.choice_wait <= 6:
@@ -2550,24 +2608,43 @@ class Walk:
                      "tags": [t for t in (self.boss_wants.get("tags") or []) if t not in self.roster_tags]}
             owned = self.chars.owned()
             unlisted = [bool(owned and name and name not in owned) for name in names]
-            pick, why = ST.choose_recruit(list(zip(roles, attrs)), self.roster, tags=[self.chars.tags(n) for n in names],
+            remaining = self.bosses if self.area <= 3 else self.bosses[1:]
+            boss_name = next((n for n in remaining if n in self.counters), None)
+            guide = self.counters.get(boss_name, {})
+            tags = [self.chars.tags(n) for n in names]
+            heals = [self.chars.heal(n) for n in names]
+            needed = set(guide.get("always", [])) | set(guide.get("need", []))
+            need_tank = "tank" in needed and not self.roster.get("tank") and not any(role == "tank" for _, role in self.run_units.values())
+            heal_count = sum(role == "heal" or self.chars.heal(n) >= 1 for n, (_, role) in self.run_units.items())
+            need_heal = "heal" in needed and max(heal_count, int(self.roster_heal), self.roster.get("heal", 0)) < (guide.get("heals") or 1)
+            missing_tags = set(guide.get("want", [])) - self.roster_tags
+            for n in self.run_units:
+                missing_tags.difference_update(self.chars.tags(n))
+            eligible = [i for i, role in enumerate(roles) if (need_tank and role == "tank")
+                        or (need_heal and (role == "heal" or heals[i] >= 1)) or missing_tags & tags[i]] or None
+            if guide:
+                wants = {"roles": [r for r, missing in (("tank", need_tank), ("heal", need_heal)) if missing],
+                         "tags": sorted(missing_tags)}
+            pick, why = ST.choose_recruit(list(zip(roles, attrs)), self.roster, tags=tags,
                                           atks=sides, side=self.recruit_side, wants=wants,
                                           powers=[1.0 if self.chars.is_pvp(n) else self.chars.power(n) for n in names],     # 纯竞技场用的角色：招募时按最低强度算
-                                          heals=[self.chars.heal(n) for n in names], unlisted=unlisted)
+                                          heals=heals, unlisted=unlisted, eligible=eligible)
             original_pick, trial = pick, {}
             if self.recruit_win and len(btns) == 3:
                 pick, trial = RC.trial_recruit(self.chars, owned, self.recruit_team, list(zip(names, roles, attrs)),
-                                              pick, self.dmg.rates() if self.dmg else {},
-                                              self.boss_dmg.rates() if self.boss_dmg else {})
+                                              pick, self.chars.rates if self.road_dmg is not None else {},
+                                              self.boss_dmg.rates() if self.boss_dmg else {}, guide, eligible)
                 if pick != original_pick:
                     road = trial["road"]["rows"][pick]["gain"]
                     boss = trial["boss"]["rows"][pick]["gain"]
-                    why = f"整队试排从{names[original_pick]}改选{names[pick]}（道中 +{road:g}，单体首领 +{boss:g}）"
+                    why = f"整队试排从{names[original_pick]}改选{names[pick]}（道中 +{road:g}，首领 +{boss:g}）"
+            if eligible:
+                why += f"；优先补{boss_name}的对策缺口"
             if any(unlisted):
                 why += "；名单外已降权：" + "、".join(name for name, outside in zip(names, unlisted) if outside)
             label = f"选择第 {pick + 1} 个（{show[pick]}，{why}；三个是 {'、'.join(show)}）"
-            r.log.event("recruit", cards=[[c.role, c.attr] for c in cards], resolved=list(zip(roles, attrs)), names=names, pick=pick, roster=dict(self.roster),
-                        original_pick=original_pick, team_trial=trial,
+            recruit_event = dict(cards=[[c.role, c.attr] for c in cards], resolved=list(zip(roles, attrs)), names=names, pick=pick, roster=dict(self.roster),
+                        original_pick=original_pick, team_trial=trial, boss_guide=boss_name, eligible=eligible,
                         atks=[self.chars.atk(n) for n in names], side=self.recruit_side, power=[self.chars.power(n) for n in names], wants=wants)
             after = ("role", roles[pick], names[pick], attrs[pick])
         else:
@@ -2604,8 +2681,16 @@ class Walk:
                 r.log.event("relic_pick", options=[[o[0], o[1]] for o in opts], pick=pick, levels=dict(self.series))
                 after = ("series", opts[pick])
         self.choice_wait = 0
-        pick = min(pick, len(btns) - 1)
-        if self._tap_wait(s, choose_button(btns[pick][1]), label, think=True) != "changed" and after is not None:
+        if role_reward:
+            status = r.tap(s, choose_button(btns[pick][1]), label, think=True)
+            if status == "changed" or not r.wait_leave(s.page, 6.0) or status != "tapped":
+                return
+            r.log.event("recruit", **recruit_event)
+        else:
+            pick = min(pick, len(btns) - 1)
+            if self._tap_wait(s, choose_button(btns[pick][1]), label, think=True) == "changed":
+                return
+        if after is not None:
             if after[0] == "role":
                 self.recruit_win = False
             if after[0] == "role" and after[1]:

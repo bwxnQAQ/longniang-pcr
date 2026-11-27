@@ -2565,6 +2565,15 @@ class Walk:
         else:
             marks = CD.mark_attrs(r.book, s.img)
             if any(m is not None for m in marks):
+                if None in marks or len(btns) != 3:
+                    self.choice_wait += 1
+                    if self.choice_wait <= 4:
+                        r.pause(0.5 * self.patience)
+                        return
+                    self.choice_wait = 0
+                    r.hand_over(s, "印记的三个属性或选择按钮没有读全，请选择这次印记")
+                    r.wait_leave(s.page, 15.0)
+                    return
                 values = self._mark_values()
                 pick, why = ST.choose_mark(marks, values=values)
                 label = f"选择第 {pick + 1} 个（{CD.ATTR_CN[marks[pick]]}属性的印记；三个是 {'、'.join(CD.ATTR_CN[m] for m in marks)}）"
@@ -2575,6 +2584,11 @@ class Walk:
                 if all(o[0] is None for o in opts) and self.choice_wait < 4:
                     self.choice_wait += 1
                     r.pause(0.5 * self.patience)
+                    return
+                if all(o[0] is None for o in opts):
+                    self.choice_wait = 0
+                    r.hand_over(s, "三个奖励都没认出来，请选择这次奖励")
+                    r.wait_leave(s.page, 15.0)
                     return
                 pick, why = ST.choose_relic(opts, self.series)
                 label = (f"选择第 {pick + 1} 个（{CD.SERIES_CN[opts[pick][0]]} ★{opts[pick][1]}，{why}；"

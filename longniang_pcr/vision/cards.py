@@ -330,10 +330,14 @@ def mark_attrs(book: PageBook, img: np.ndarray) -> list[str | None]:
     out = []
     for i in range(3):
         best: tuple[str | None, float] = (None, 0.0)
-        for sc in (s - 0.05, s, s + 0.05):                   # 这个徽标的大小量得没那么准，前后各试一档
-            a, v = _classify(book, norm, x0 + dx * i, y0, "ico_attr_", ATTRS, scale=sc, pad=5)
-            if a is not None and v > best[1]:
-                best = (a, v)
+        # 入场时三张卡依次往上滑，各自离最终位置的距离不同。
+        for dy in (0, 12, 24, 36, 48):
+            for sc in (s - 0.05, s, s + 0.05):
+                a, v = _classify(book, norm, x0 + dx * i, y0 + dy, "ico_attr_", ATTRS, scale=sc, pad=5)
+                if a is not None and v > best[1]:
+                    best = (a, v)
+            if best[0] is not None:
+                break
         out.append(best[0])
     return out
 

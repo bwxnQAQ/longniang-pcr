@@ -1710,9 +1710,6 @@ class Walk:
             self.last_had = (["tank"] if ST.tank_in_front(plan.team) or sub0 is not None else []) + (["heal"] if any(ST.can_heal(u) for u in plan.team) else [])
             if boss == 1:
                 self.boss_lineups.clear()
-            if is_boss:
-                self.boss_lineups[boss] = {"had": list(self.last_had),
-                                           "front_tough": sub0.tough if sub0 else None}
             named = sum(1 for u in units if u.name)
             vs = f"打{self.enemy}，" if self.enemy else ""
             side_cn = (f"，{ST.SIDE_CN[plan.side]}" if plan.side else "") + (f"；{ST.TARGETS_CN[self.targets]}" if self.targets in ST.TARGETS_CN else "")
@@ -2283,7 +2280,20 @@ class Walk:
             if members is None:
                 members = CD.member_cards(self.r.book, s.img)
             self.face_names = [self.chars.identify(c.fp, c.role, c.attr)[0] if c else None for c in members]
-            self.boss_lineups.setdefault(boss_tab, {})["team"] = list(dict.fromkeys(n for n in self.face_names if n))
+            actual = [ST.Unit(i, c.role or self.chars.roster.get(n, {}).get("role"), c.attr, name=n,
+                              func=self.chars.role_as(n), pos=self.chars.pos(n), tough=self.chars.tough(n),
+                              heal=self.chars.heal(n))
+                      for i, (c, n) in enumerate(zip(members, self.face_names)) if c is not None]
+            stand_in = ST.stand_in_tank(actual)
+            had = []
+            if stand_in or (all(u.pos is not None or u.kind == "tank" for u in actual) and ST.tank_in_front(actual)):
+                had.append("tank")
+            if any(ST.can_heal(u) for u in actual):
+                had.append("heal")
+            self.boss_lineups[boss_tab] = {
+                "team": list(dict.fromkeys(n for n in self.face_names if n)), "had": had,
+                "front": stand_in.name if stand_in else None, "front_tough": stand_in.tough if stand_in else None,
+            }
         if not self.report_on or self.team_mode != "role":
             return True
         try:

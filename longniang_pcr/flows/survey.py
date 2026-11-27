@@ -113,6 +113,11 @@ class Survey:
                 m.add_edges(ca, {(la, 416): 1.0 for la in ra})
             else:
                 m.add_edges(ca, RT.column_edges(mask, xa, ra, xb, rb))
+        for _x, c, _rows, boss in info:
+            # 首领前面那一列（只有一格商店）这一屏没被认成格子、但上一屏看过：连线照样补上。暗的格子（商店）的边框有时认不出来——
+            # 2026-11-27 一位玩家在区域 5 最后一屏就是这样（只认出了首领），以前会停在“第 6 列和下一列之间的连线没看到”
+            if boss and c >= 2 and all(ci != c - 1 for _, ci, _, _ in info) and m.seen.get(c - 1):
+                m.add_edges(c - 1, {(la, 416): 1.0 for la in sorted(m.seen[c - 1])})
         self.views += 1
         if not info:
             return 0, 0
@@ -125,12 +130,28 @@ class Survey:
     def _realign(self, img: np.ndarray, moved: float, want: float) -> float:
         """拖动中没跟住时用：拿停稳后这一屏看到的列，和已经记下的地图对，定下地图到底挪了多少。
         试“量到的 moved 再加减几整列”这几种挪法：每种挪法下，画面上每一列该是第几列就定了；以前看过的列，格子在哪几行、是什么格子要对得上。
-        只有一种挪法对得上（而且至少对上了一列以前看过的）才算数，返回那种挪法；否则停。"""
+        只有一种挪法对得上（而且至少对上了一列以前看过的）才算数，返回那种挪法；否则停。
+        2026-11-27（V1.11）加了两样——一位玩家在区域 5 最后一拖停下：拖动中丢了 8 帧，量到 588（实际 700，差的不是整列）；
+        停稳的画面里又只认出了首领那一列，左边的商店（上一屏看过的第 6 列）边框没认出来，于是“没有一种挪法对得上”：
+        · 量到的数可能差着不是整列的一截，所以再按“看到的列必须落在整列上”反推几种挪法一起试；
+        · 以前看过、按这种挪法该在画面里、这一屏却没被认成格子的列：直接去那个位置看图标（印记 / 遗物 / 事件 / 商店），
+          记下的图标都对得上算对上了一列，有一个对不上就不是这种挪法。"""
         r, m = self.r, self.map
         cols = [(x, tl) for x, tl in TL.columns(TL.find_tiles(r.book, img)) if 45 <= x <= 1235 and tl]
+        cands = [moved + k * TL.COL_DX for k in (0, 1, -1, 2, -2)]
+        if cols:
+            base = self.x0 - cols[0][0] - self.offset            # 看到的第一列挪完以后是第 c 列 ⇒ 挪了 c·COL_DX + base
+            grid = lambda mv: round((mv - base) / TL.COL_DX) * TL.COL_DX + base      # noqa: E731
+            # 量到的那几种：离“整列”不到 60 像素的就贴到整列上（看到的格子比拖动中量的准；也免得同一种挪法算成两种）
+            cands = [grid(mv) if abs(grid(mv) - mv) <= 60.0 else mv for mv in cands]
+            c0 = int(round((want - base) / TL.COL_DX))
+            for c in (c0, c0 - 1, c0 + 1, c0 - 2, c0 + 2):       # 再加上想挪的距离附近的几种整列挪法
+                mv = c * TL.COL_DX + base
+                if all(abs(mv - o) > 1.0 for o in cands):
+                    cands.append(mv)
+        cands = [mv for i, mv in enumerate(cands) if all(abs(mv - o) > 1.0 for o in cands[:i])]
         good: list[tuple[int, float]] = []
-        for k in (0, 1, -1, 2, -2):
-            mv = moved + k * TL.COL_DX
+        for mv in cands:
             if abs(mv - want) > 1.6 * TL.COL_DX or mv * want < -60.0 * abs(want):
                 continue
             off = self.offset + mv
@@ -159,6 +180,19 @@ class Survey:
                 if bad:
                     break
                 hits += 1 if same else 0
+            shown = {int(round((x + off - self.x0) / TL.COL_DX)) for x, _ in cols}
+            for c, rows_seen in (() if bad else sorted(m.seen.items())):
+                x = c * TL.COL_DX + self.x0 - off
+                if c < 1 or c in shown or not 45 <= x <= 1235:
+                    continue
+                was = {ly: k for ly, k in m.rows.get(c, {}).items() if ly in rows_seen and k in TL.ICON_KINDS}
+                if not was:
+                    continue
+                now = {ly: TL.kind_at(r.book, img, int(round(x)), ly) for ly in was}
+                if any(now[ly] and now[ly] != was[ly] for ly in was):
+                    bad = True
+                    break
+                hits += 1 if all(now[ly] == was[ly] for ly in was) else 0
             if not bad and hits:
                 good.append((hits, mv))
         best = max((h for h, _ in good), default=0)

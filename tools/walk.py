@@ -494,7 +494,8 @@ def main() -> int:
                 adopt = True
                 continue
             took = bool(res.get("took_over"))            # 这一局是接手的：是哪个公会、出发前有几张门票，工具都没看到
-            pass_note = "这一局是接手的，出发前的门票数量我没看到，没法比（撤退会把这一局的门票退回，可以看一眼）" if took else "门票数量和出发前一样"
+            pass_note = ("这一局是接手的，出发前的门票数量我没看到，没法比（撤退会把这一局的门票退回，可以看一眼）" if took
+                         else f"门票没少（{res['pass_note']}）" if res.get("pass_note") else "门票数量和出发前一样")
             rows.append({"n": len(rows) + 1, "guild": "（接手的一局）" if took else guild, "fights": res.get("fights") or [], "minutes": res.get("seconds", 0) / 60.0, "moves": len(res["moves"]), "battles": res["battles"],
                          "losses": res.get("losses"), "score": res.get("score_if_cleared") if (res.get("cleared") or res.get("at_final")) else None,
                          "result": "打通了" if res.get("cleared") else "停在最终首领跟前" if res.get("hold") else "没到分，撤退重打" if res.get("settled") == "redo"
@@ -510,7 +511,8 @@ def main() -> int:
                 log.say(f"  ✓ 打通了：{len(res['moves'])} 格、{res['battles']} 场战斗，累计点了 {res['taps']} 下，这一趟用时 {res['seconds'] / 60:.0f} 分钟。"
                         f"分数页和宝箱的截图在记录文件夹的 shots 里（result_final、chest_result）。")
                 if not res["ok"]:
-                    log.say("  ! 回到迷宫首页后门票（通行证）数字那一块和出发前一样，按理应该少 1 张，请看一眼。")
+                    log.say("  ! 回到迷宫首页后门票（通行证）" + (f"对不上：{res['pass_note']}" if res.get("pass_note")
+                                                               else "数字那一块和出发前一样，按理应该少 1 张") + "，请看一眼。")
                 if loot is not None:
                     loot.save()
                     for line in loot.lines():
@@ -541,7 +543,9 @@ def main() -> int:
                 log.say(f"  —— 再来一局（第 {lap} 局还没打成；没到分的已经有 {misses} 局，上限 {miss_cap}）——")
                 continue
             elif not res["ok"]:
-                log.say(f"  ! 撤退回来了，但门票（通行证）数字那一块和出发前不一样（差异 {res['pass_diff']}）。请看一眼游戏里的门票数量，并把这个文件夹告诉我。")
+                log.say("  ! 撤退回来了，但门票（通行证）" + (f"对不上：{res['pass_note']}" if res.get("pass_note")
+                                                           else f"数字那一块和出发前不一样（差异 {res['pass_diff']}；数字没读出来，所以分不出是多了还是少了）")
+                        + "。请看一眼游戏里的门票数量，并把这个文件夹告诉我。")
                 code = 1
                 break
             elif res.get("at_final") and settle_spend:       # 勾了门票，但最终首领没打下来：已经撤退（门票没用），不算一局

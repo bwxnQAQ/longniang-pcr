@@ -451,6 +451,30 @@ class Walk:
         diff = float(np.abs(now.astype(np.int16) - self.pass_before.astype(np.int16)).mean())
         return diff < 2.5, diff
 
+    def _pass_check(self, img: np.ndarray) -> tuple[bool, float, str, int | None]:
+        """回到迷宫首页：通行证对不对得上。返回（对得上吗, 数字那一块的图像差异, 要说的话, 现在读到几张）。
+
+        游戏每天北京时间 12 点会发一张通行证（2026-11-27 两台电脑上都撞上了：一趟跨过 12 点，撤退回来比出发前多 1 张，
+        以前只比“数字那一块图像变没变”，把变多也当成出错、整次任务停掉）。所以读得出数字时按数字比，只有**变少**才算对不上：
+          撤退回来：不比出发前少就对；打通结算回来：这一局用掉 1 张，不比“出发前 - 1”少就对。
+        数字读不出来时照旧比图像（撤退：应该没变；打通：应该变了）。"""
+        same, diff = self._same_pass(img)
+        if self.pass_unsure or self.pass_before is None:
+            return True, diff, "", None
+        after = self._read_passes(img)
+        before = self.passes
+        if not self.cleared and same:                # 撤退回来、数字那一块和出发前一模一样：没变，不用再看读出来的数（免得读错一位闹误会）
+            return True, diff, "", after
+        if before is None or after is None or not 0 <= after <= 999:
+            return ((not same) if self.cleared else same), diff, "", after
+        expect = before - 1 if self.cleared else before
+        if after < expect:
+            return False, diff, f"出发前 {before} 张，现在 {after} 张，比应该有的 {expect} 张少了 {expect - after} 张", after
+        if after > expect:
+            return True, diff, (f"出发前 {before} 张、现在 {after} 张，比应该有的 {expect} 张多 {after - expect} 张："
+                                "游戏每天北京时间 12 点会发通行证，不是出错"), after
+        return True, diff, "", after
+
     def _tap_wait(self, s: Seen, box: NBox, label: str, think: bool = False, timeout: float = 6.0) -> str:
         res = self.r.tap(s, box, label, think)
         if res != "changed":
@@ -820,7 +844,17 @@ class Walk:
                     raise Halt("战斗画面离开超过 1 分钟还没出现 WIN!（可能是打输了，失败画面我还没见过）")
                 how = f"首领战派了 {teams} 队，每队按 {self.battle_timeout:.0f} 秒算" if teams > 1 else f"一场按 {self.battle_timeout:.0f} 秒算"
                 still = "计时器还在走，但已经等到两倍了" if now - last_tick <= self.BATTLE_TICK else f"计时器也有 {now - last_tick:.0f} 秒没动过了"
-                raise Halt(f"这场战斗打了超过 {now - t0:.0f} 秒还没结束（{how}；{still}）")
+                frozen = ""
+                if now - last_tick > 0.8 * (now - t0) and last_tm is not None:
+                    # 几乎从开打起计时器就停在同一个数上：不是打得慢，是游戏卡住了。2026-11-27 一位玩家连着两次卡在优衣（公主）的大招动画上
+                    # （计时器停在 1:25，画面是她的特写，背景还在动）——这是游戏 / 模拟器那边的事，工具战斗中什么都不点
+                    first = [n for n in self.last_team if "/" not in n and not self.run_wins.get(n)]
+                    frozen = (f"。计时器从还剩 {last_tm} 秒起就没动过：游戏多半是卡在某个角色的大招动画上了（不是工具点错了）。"
+                              f"场上是 {'、'.join(self.last_team)}"
+                              + (f"；其中这一局第一次上场的是 {'、'.join(first)}，先怀疑她们" if first and len(first) < len(self.last_team) else "")
+                              + "。可以手动点一下画面看能不能跳过；老是卡在同一个角色上的话，在游戏的设定里把大招动画关掉再试")
+                    r.log.event("battle_frozen", timer=last_tm, team=list(self.last_team), first=first, seconds=round(now - t0, 1))
+                raise Halt(f"这场战斗打了超过 {now - t0:.0f} 秒还没结束（{how}；{still}）{frozen}")
             r.pause(0.5)
 
     # ---- 各页面 ----
@@ -1990,14 +2024,13 @@ class Walk:
             seen = f"读到的字是“{got['text']}”" if got["text"] else "名字没读出来"
             r.log.say(f"      这个敌人（{kind}）不在对策表里（{seen}），按默认的全输出打法编队（输了再换稳妥的）。画面已存下来，之后补进对策表。")
         elif self.battle_kind == "extreme" and self.unseen_group:
-            # 极难格子里的一排敌人 = 六组“装置 + 几个角色”里的一组。认得出的四组上面已经认了；剩下没见过画面的两组（回复装置、炸弹装置）
-            # 攻略都点名要范围输出，所以认不出来时按“要范围输出”排，不再用什么都不管的默认打法（2026-11-27：玩家在区域 5 遇到带回复的那一组，
-            # 工具上了一队打单体的，打到时间到）
+            # 极难格子里的一排敌人 = 六组“装置 + 几个角色”里的一组，或者带一个装置的蜂后 / 美空。2026-11-27 傍晚起这些都有模板；
+            # 还是认不出时按“要范围输出”排，不用什么都不管的默认打法（2026-11-27：玩家在区域 5 遇到带回复的那一组，上了一队打单体的，打到时间到）
             self.tweak = dict(self.unseen_group)
             self.targets = self.tweak.get("targets") or self.targets
             r.log.shot(s.img, "enemy_lineup")
-            r.log.say(f"      这一场（{kind}）是一组敌人，页面上没有名字，画面也对不上认得的那几组。还没见过画面的两组（回复装置、炸弹装置）"
-                      "攻略都点名要范围输出：按“要范围输出”编队（会打一群的输出至少带 3 个，名单里没那么多就有几个带几个）。画面已存下来。")
+            r.log.say(f"      这一场（{kind}）是一组敌人，页面上没有名字，画面也对不上认得的那几组（六组装置、蜂后、美空）。"
+                      "按“要范围输出”编队（会打一群的输出至少带 3 个，名单里没那么多就有几个带几个）。画面已存下来。")
         else:
             r.log.shot(s.img, "enemy_lineup")
             r.log.say(f"      这一场（{kind}）是一组敌人，页面上没有名字，认不出是哪一组，按默认的全输出打法编队（输了再换稳妥的）。")
@@ -2033,6 +2066,9 @@ class Walk:
             return None
         stage = adv.stage(self.enemy, self.area or None)
         if stage is None:
+            return None
+        if (tweak or {}).get("no_est"):              # 这个敌人的推演和真机对不上（对策表里写了 no_est）：不拿它挑队，照攻略对策排的那一队上
+            self.r.log.say(f"      （{self.enemy}：战斗估算和真机上的结果对不上，这一关不用估算，上按攻略对策排的这一队。）")
             return None
         known = [u for u in units if adv.knows(u.name)]
         if len(known) < 5 or len(plan.team) != 5:
@@ -2899,11 +2935,13 @@ class Walk:
                     last, same = "", 0
                     continue
                 if self.departed and self.seen_confirm:
-                    same_pass, diff = self._same_pass(s.img)
                     r.log.shot(s.img, "lab_home_after", png=True)
-                    # 撤退回来：通行证数字应该和出发前一样。打通结算回来：这一局用掉了 1 张，数字应该变了
-                    ok = (not same_pass) if self.cleared else same_pass
+                    # 撤退回来：通行证应该不比出发前少。打通结算回来：这一局用掉了 1 张（多出来的是游戏按时间发的，不算错）
+                    ok, diff, pass_note, pass_after = self._pass_check(s.img)
+                    if pass_note:
+                        r.log.say(f"      通行证：{pass_note}。")
                     self.result = {"ok": ok, "cleared": self.cleared, "at_final": self.at_final, "pass_diff": round(diff, 2), "taps": r.taps,
+                                   "pass_note": pass_note, "pass_before": self.passes, "pass_after": pass_after,
                                    "moves": list(self.moves), "battles": self.battles,
                                    "why": "打完最终首领，已结算" if self.cleared else self.why_retreat, "restart": self.restart,
                                    "surveys": self.surveys, "seconds": round(time.time() - t_start, 1),

@@ -7,7 +7,8 @@
 - 坦克要站在最前面才有意义（站位数最小，data/characters.json 的 pos）：坦克前面还站着别人，这个坦克就不算数。
 - 敌人是一群还是一个：一群时先带打一群的输出，一个大敌人时先带打单体的（data/characters.json 的 hits）。
 - 物理队和法队分开：一队里的输出、破防、增益、减益尽量是同一种伤害类型（每个角色是物理还是魔法见 data/characters.json 的 atks）。
-- 同一个角色的不同版本不能同时上场：一队里不重复带。
+- 同一个角色的不同版本可以编进同一队（SAME_NAME_OK）。2026-11-27 晚以前写的是“不能同时上场、一队里不重复带”——那是我按别的玩法的规矩想当然写的，
+  没在黎明界里验证过；用户 2026-11-27 20:28 确认：黎明界里同名角色可以编入一队。V1.10 起不再限制。
 - 2026-11-18 晚（真机上厄勒克特拉夫人三次没打过之后）用户又定的：
   · 厄勒克特拉夫人默认就带一个坦克（对策表里写 always 的职能第一次打就带）；区域 3 首领只用一队打。
   · 打输了看是怎么输的：从最前面开始一个个倒 → 加坦克；全队血量一起崩 → 加治疗；时间到了人还活着 → 伤害不够，保命的人留着、把输出换一批。
@@ -209,7 +210,7 @@ class Unit:
     name: str | None = None                             # 认出来是哪个角色（头像库里有才有）
     tags: frozenset = frozenset()                       # 这个角色的特点（data/characters.json）
     atk: str | None = None                              # "phys" 物理 / "magic" 魔法（认出名字才有）
-    base: str | None = None                             # 本名（去掉“（版本）”）：同一个角色的不同版本不能同时上场
+    base: str | None = None                             # 本名（去掉“（版本）”）。同一个角色的不同版本可以同队（SAME_NAME_OK）
     hit: str | None = None                              # "aoe" 擅长打一群 / "single" 擅长打一个 / "both"；没有资料是 None
     pos: int | None = None                              # 站位（数越小越靠前，一队里最小的站最前面）；不认识名字是 None
     func: str | None = None                             # 实际按哪种职能用（游戏标的职能不合用时才有，比如标着治疗的强力增益）
@@ -275,8 +276,23 @@ def team_side(team: Sequence[Unit]) -> str | None:
     return min(SIDES, key=lambda sd: pen[sd])
 
 
+# 同一个角色的不同版本（咲恋、咲恋（夏日）……）能不能编进同一队。True：能（黎明界迷宫里可以，用户 2026-11-27 确认）。
+# 以前一直当成不能：编队、战斗估算换人、开局三人都躲着，“名单里有几个输出 / 几个会打一群的”也把几个版本只算一个——等于白白少了能上的人。
+SAME_NAME_OK = True
+
+
+def dup_blocked(team: Sequence[Unit]) -> bool:
+    """这一队是不是因为“同一个角色上了两个版本”而不能用。SAME_NAME_OK 时永远不是。"""
+    return (not SAME_NAME_OK) and has_dup(team)
+
+
+def _one(u: Unit) -> Any:
+    """数“名单里有几个……”时拿什么当一个人：能同队时每个版本各算一个；不能同队时同一个本名只算一个。"""
+    return (u.name or id(u)) if SAME_NAME_OK else (u.base or u.name or id(u))
+
+
 def has_dup(team: Sequence[Unit]) -> bool:
-    """队里有没有同一个角色的两个版本（游戏不让同时上场）。"""
+    """队里有没有同一个角色的两个版本。（只是看有没有；让不让这样编队看 SAME_NAME_OK / dup_blocked。）"""
     seen: set[str] = set()
     for u in team:
         if u.base:
@@ -296,8 +312,8 @@ def fit_targets(u: Unit, targets: str | None) -> float:
 
 
 def own_dealers(units: Iterable[Unit]) -> int:
-    """名单里玩家自己有的输出（攻击 / 破防）有几个；同一个角色的几个版本只算一个。说不准有没有的当成有。"""
-    return len({u.base or u.name or id(u) for u in units if u.kind in DAMAGE and u.owned is not False})
+    """名单里玩家自己有的输出（攻击 / 破防）有几个（同一个角色的几个版本各算一个，见 SAME_NAME_OK）。说不准有没有的当成有。"""
+    return len({_one(u) for u in units if u.kind in DAMAGE and u.owned is not False})
 
 
 def unowned_cost(team: Sequence[Unit], own_n: int | None = None) -> int:
@@ -332,7 +348,7 @@ def roster_facts(units: Sequence[Unit], tweak: dict[str, Any] | None = None) -> 
             "heal": any(can_heal(u) for u in units),
             "aoe": aoe_dealers(units),
             "side": {sd: sum(1 for u in units if u.kind in DAMAGE and u.atk == sd) for sd in SIDES},
-            "want": len({u.base or u.name or id(u) for u in units if u.effective or (want & u.tags)}) if want else 0,
+            "want": len({_one(u) for u in units if u.effective or (want & u.tags)}) if want else 0,
             "placed": sum(1 for u in units if u.pos is not None)}
 
 
@@ -352,8 +368,8 @@ def weak_front(team: Sequence[Unit], units: Sequence[Unit] | dict[str, Any]) -> 
 
 
 def aoe_dealers(units: Iterable[Unit]) -> int:
-    """名单里会打一群的输出（攻击 / 破防，打一群或者两样都行）有几个；同一个角色的几个版本只算一个。"""
-    return len({u.base or u.name or id(u) for u in units if u.kind in DAMAGE and u.hit in ("aoe", "both")})
+    """名单里会打一群的输出（攻击 / 破防，打一群或者两样都行）有几个（同一个角色的几个版本各算一个，见 SAME_NAME_OK）。"""
+    return len({_one(u) for u in units if u.kind in DAMAGE and u.hit in ("aoe", "both")})
 
 
 PACK_FAR = 450                                         # 对策表写了 pack（站位要集中：熔岩龙）：比最前面的人靠后超过这么多的人，算“没挤在一起”。
@@ -745,7 +761,7 @@ def choose_team(units: Sequence[Unit], kind: str = "normal", weak: str | None = 
     tweak = 对策表里这个敌人的那一条（没认出敌人就是 None）——其中“要带坦克 / 治疗”从第 2 次打才算；side = 指定物理队 / 法队（不指定就自己看哪边强）；
     targets = 敌人是一群（"multi"）还是一个（"single"）：对上号的输出优先。
     profile / avoid = plan_retry 定好的打法和扣分（给了就照它来，tweak 也已经是它改过的，不再按 attempt 换）。
-    同一个角色的不同版本不会一起带。
+    同一个角色的不同版本可以一起带（SAME_NAME_OK）。
 
     做法（2026-11-19 用户定的）：先定队伍路线，再在路线里挑人。路线 = 物理队 / 法队 × 输出是不是同一个属性——
     把名单按每条路线各筛一遍（另一边的输出、帮另一边的增益不进来），每条路线里排出最好的一队，再比哪条路线的队最好；
@@ -783,10 +799,10 @@ def choose_team(units: Sequence[Unit], kind: str = "normal", weak: str | None = 
             fill = (marked + strong)[:max(CONCEPT_FILL, n0 - len(pool))] if at is None else marked[:CONCEPT_FILL]
             pool = sorted(pool + fill, key=lambda z: z.order)
             n, got = n0, None
-            while got is None and n >= 0:            # 名单里全是同一个角色的几个版本时凑不满：少带一个再试
+            while got is None and n >= 0:            # （同名不能同队的时候）名单里全是同一个角色的几个版本会凑不满：少带一个再试
                 for combo in combinations(pool, n):
                     cand = must + list(combo)
-                    if has_dup(cand) and not has_dup(must):
+                    if dup_blocked(cand) and not dup_blocked(must):
                         continue
                     sc = team_score(cand, profile, weak, tweak, sd if side in SIDES else None, targets, avoid)
                     adj = sc
@@ -946,7 +962,7 @@ def choose_start(cands: Sequence[tuple[str | None, str | None]], n: int = 3, att
                  funcs: Sequence[str | None] | None = None, aids: Sequence[str | None] | None = None,
                  powers: Sequence[float] | None = None, owned: Sequence[bool | None] | None = None) -> list[int]:
     """开局从公会成员里挑 n 个：当成一支只有 n 个人的快攻队来挑——输出、破防、回 TP 的强化型、增益优先，坦克和治疗不到没人可选不拿；
-    物理和魔法不混；同一个角色的不同版本不能同时上场，所以不重复拿；别的都一样时看属性（暗 = 火 > 光 > 水 > 风）。
+    物理和魔法不混；同一个角色的不同版本可以一起拿（SAME_NAME_OK，2026-11-27 以前是不重复拿）；别的都一样时看属性（暗 = 火 > 光 > 水 > 风）。
     names / tags / atks / bases / funcs / aids 是每张卡认出来的名字、特点、物理还是魔法、本名、实际按哪种职能用、增益给哪边（认不出就是 None）。
     owned = 每张卡玩家自己有没有（False = 没有，练度低）：自己有的优先拿。返回选中的第几张（从 0 数）。"""
     def opt(lst: Sequence | None, i: int, default: Any = None) -> Any:

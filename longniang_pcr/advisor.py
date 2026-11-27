@@ -5,7 +5,8 @@
   · 规则排出来的几队只当搜索的起点，不再是限制——带不带坦克、带不带奶、物理队还是法队、谁站最前面，都由推演的结果决定；
   · 从最好的两个起点出发，一个位置一个位置地换成名单里别的人再推演，有更好的就换（ROUNDS 轮，整个名单都能换进来）；
   · 每一队都推演两遍——“照常”和“敌人更疼、我方更弱”（PESSIMISTIC）——两遍都能赢的排在前面，再比谁快、谁倒的人少；
-  · 只留两条不是“选人规则”的限制：同一个角色的不同版本不能同时上场（游戏不让）；这一局真机上刚输过的队不再上。
+  · 只留一条不是“选人规则”的限制：这一局真机上刚输过的队不再上。
+    （以前还有一条“同一个角色的不同版本不能同时上场”——用户 2026-11-27 确认黎明界里同名角色可以编入一队，V1.10 去掉了，见 strategy.SAME_NAME_OK。）
   · 真机输过几次，就把敌人的伤害再往上估一档（估算已经被证明偏乐观了）；这一局真机赢过的人略微优先。
 估算不了的战斗（普通小怪、敌人没认出来、名单里认得的人不够）还是照 strategy.py 的规则排。
 
@@ -27,6 +28,7 @@ import time
 from typing import Any, Callable, Iterable, Sequence
 
 from . import battle as BT
+from . import strategy as ST
 
 # 2026-11-24：修掉“第一次才有的效果每次都给”那一类错以后，什么系数都不加（都是 1）时胜负对得最好——真机 31 场对上 26 场。
 # 用时还没法校（以前记的是现实秒，见上）；等攒够带计时器读数的战斗再说。
@@ -136,6 +138,8 @@ class Advisor:
             names = [u.name for u in team]
             if len(set(names)) != len(names) or frozenset(names) in lost_sets or not all(self.knows(n) for n in names):
                 return False
+            if ST.SAME_NAME_OK:                      # 同一个角色的不同版本可以同队（黎明界里可以，2026-11-27 用户确认）
+                return True
             bases = [getattr(u, "base", None) or u.name for u in team]
             return len(set(bases)) == len(bases)
 

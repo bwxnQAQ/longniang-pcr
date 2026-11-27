@@ -13,7 +13,15 @@ def unit(book, owned, rates, name, role, attr):
 
 
 def compare(team, offers, pick, profile, targets, tweak=None, eligible=None):
-    base = st.team_score(team, profile, tweak=tweak, targets=targets)
+    guide = tweak or {}
+    sides = guide.get("sides") or []
+    side = sides[0] if sides else None  # 单队试排按攻略的第一队评估
+    prefer = guide.get("side") if side not in st.SIDES else None
+
+    def score(lineup):
+        return st.team_score(lineup, profile, tweak=tweak, side=side, targets=targets) + st.side_bonus(lineup, prefer)
+
+    base = score(team)
     rows = []
     for candidate in offers:
         gain, replaced = 0.0, None
@@ -21,7 +29,7 @@ def compare(team, offers, pick, profile, targets, tweak=None, eligible=None):
             trial = team[:i] + [candidate] + team[i+1:]
             if st.has_dup(trial):
                 continue
-            delta = round(st.team_score(trial, profile, tweak=tweak, targets=targets) - base, 3)
+            delta = round(score(trial) - base, 3)
             if delta > gain:
                 gain, replaced = delta, member.name
         rows.append(dict(name=candidate.name, outside=candidate.unlisted, gain=gain, out=replaced))

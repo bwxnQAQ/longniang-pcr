@@ -190,11 +190,13 @@ def list_cards(book: PageBook, img: np.ndarray) -> list[Card]:
 DEFEAT_HP = (305, 117, 95, 264, 269)     # 首领战失败页面“第 N 战 失败”那一栏：第一个人血条的左边、每个人的间隔、血条宽、血条的上下沿
 
 
-def defeat_hp(img: np.ndarray) -> list[float]:
+def defeat_hp(img: np.ndarray, team: int = 1) -> list[float]:
     """首领战的失败页面上，上场的五个位置各还剩多少血（0～1，绿色那一段有多长）。空位和倒下的人都是 0。
     只有首领战的失败页面有这一栏（普通战的失败页面是一张提示图），是不是那种页面由调用的人先判断。"""
     norm = to_norm(img)
     x0, dx, w, y0, y1 = DEFEAT_HP
+    y0 += 162 * (team - 1)
+    y1 += 162 * (team - 1)
     out = []
     for i in range(SLOTS):
         p = norm[y0:y1, x0 + dx * i:x0 + dx * i + w].astype(np.int16)

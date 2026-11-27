@@ -270,6 +270,15 @@ def team_side(team: Sequence[Unit]) -> str | None:
     return min(SIDES, key=lambda sd: pen[sd])
 
 
+def side_bonus(team: Sequence[Unit], prefer: str | None) -> float:
+    if prefer not in SIDES:
+        return 0.0
+    actual = team_side(team)
+    if actual is None:
+        return 0.0
+    return SIDE_PREF if actual == prefer else -SIDE_PREF
+
+
 def has_dup(team: Sequence[Unit]) -> bool:
     """队里有没有同一个角色的两个版本（游戏不让同时上场）。"""
     seen: set[str] = set()
@@ -763,10 +772,7 @@ def choose_team(units: Sequence[Unit], kind: str = "normal", weak: str | None = 
                     if has_dup(cand) and not has_dup(must):
                         continue
                     sc = team_score(cand, profile, weak, tweak, sd if side in SIDES else None, targets, avoid)
-                    adj = sc
-                    if prefer in SIDES:              # 对策表写了敌人吃哪边：每一队都按它实际是哪边加减分再比（2026-11-19 晚以前是先挑出分最高的一队再加减，另一边的好队根本排不上来）
-                        real = team_side(cand)
-                        adj += SIDE_PREF if real == prefer else -SIDE_PREF if real in SIDES else 0.0
+                    adj = sc + side_bonus(cand, prefer)
                     if got is None or adj > got[0]:
                         got = (adj, combo, sc)
                 n -= 1

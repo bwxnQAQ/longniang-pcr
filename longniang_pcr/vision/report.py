@@ -158,6 +158,21 @@ def boss_button(norm: np.ndarray, team: int = 1) -> bool:
     return bool(b > 170 and b - r > 60 and 0.05 < float(white.mean()) < 0.6)
 
 
+def boss_result(norm: np.ndarray, team: int) -> str | None:
+    """只在报告按钮亮起时读同一行的金色胜利或蓝色失败字样。"""
+    if not boss_button(norm, team):
+        return None
+    y = 221 + 162 * (team - 1)
+    b, g, r = norm[y:y + 40, 133:222].astype(np.int16).transpose(2, 0, 1)
+    gold = ((r > 175) & (r - b > 65) & (g - b > 30)).sum()
+    blue = ((b - r > 22) & (g - r > 12)).sum()
+    if gold > 400 and blue < 100:
+        return "win"
+    if blue > 400 and gold < 100:
+        return "lose"
+    return None
+
+
 def bar_ratio(norm: np.ndarray, i: int) -> float | None:
     """第 i 行那根条有多长（0～1；1 = 伤害最高的那个人）。这一行没有条（没有这个人）返回 None。"""
     x, dy, w, h = BAR

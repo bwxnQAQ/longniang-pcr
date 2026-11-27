@@ -783,22 +783,15 @@ class Walk:
                 self.last_secs, self.last_game = round(now - t0, 1), game
                 r.log.say(f"      …打赢了，用时{took}")
                 r.log.event("battle_end", n=self.battles + 1, seconds=round(now - t0, 1), game=game, result="win", battle=self.battle_kind,
-                            attempt=self.attempt, team=list(self.last_team), enemy=self.enemy, est=self.last_est)
-                self.chars.record_battle([n for n in self.last_team if "/" not in n], self.battle_kind, round(now - t0, 1), True)
-                self.chars.save()
+                            attempt=self.attempt, team=[] if self._multi_boss() else list(self.last_team), enemy=self.enemy, est=self.last_est)
                 self._remember(True)
-                for n in self.last_team:
-                    if "/" not in n:
-                        self.run_wins[n] = self.run_wins.get(n, 0) + 1
                 self.battle_logged = True
                 return
             if s.page == "defeat":
                 self.last_secs, self.last_game = round(now - t0, 1), game
                 r.log.say(f"      …打输了，用时{took}")
                 r.log.event("battle_end", n=self.battles + 1, seconds=round(now - t0, 1), game=game, result="lose", battle=self.battle_kind,
-                            attempt=self.attempt, team=list(self.last_team), enemy=self.enemy, est=self.last_est)
-                self.chars.record_battle([n for n in self.last_team if "/" not in n], self.battle_kind, round(now - t0, 1), False)
-                self.chars.save()
+                            attempt=self.attempt, team=[] if self._multi_boss() else list(self.last_team), enemy=self.enemy, est=self.last_est)
                 self._remember(False)
                 self.battle_logged = True
                 return
@@ -1668,11 +1661,12 @@ class Walk:
                                                tweak=tweak2, side=side, targets=self.targets, profile=profile, avoid=avoid)
             if swapped:
                 why_retry = (why_retry + "；" if why_retry else "") + "排出来的队和输过的那一队一模一样，换了人再排"
-            remembered = self._remembered(units)     # 真机上打赢过的队，凑得齐就直接上：比规则和估算都可靠
+            protection_retry = bool(tries and tries[-1].get("how") == "protection")
+            remembered = None if protection_retry else self._remembered(units)     # 真机上打赢过的队，凑得齐就直接上：比规则和估算都可靠
             if remembered is not None:
                 plan = ST.plan_of(units, remembered["units"], plan.profile, self.weak, tweak2, self.targets)
                 why_retry = (why_retry + "；" if why_retry else "") + "上以前打赢过这个敌人的那一队"
-            est = self._estimate(units, plan, tweak2, side, avoid) if remembered is None and not (is_boss and self._boss_teams() > 1) else None
+            est = self._estimate(units, plan, tweak2, side, avoid) if remembered is None and not protection_retry and not (is_boss and self._boss_teams() > 1) else None
             self.last_est = None
             if est is not None:
                 rule_names = [u.name for u in plan.team]
@@ -2193,9 +2187,46 @@ class Walk:
         self.r.log.event("remembered_team", enemy=self.enemy, team=rec["team"], wins=rec["wins"], losses=rec["losses"], game=rec["game"])
         return dict(rec, units=[by[n] for n in rec["team"]])
 
+    def _multi_boss(self) -> bool:
+        return self.battle_kind == "boss" and self._boss_teams() > 1
+
+    def _record_team_result(self, team, win, seconds=None):
+        names = [n for n in team if n and "/" not in n]
+        self.chars.record_battle(names, self.battle_kind, seconds, win)
+        self.chars.save()
+        if win:
+            for n in names:
+                self.run_wins[n] = self.run_wins.get(n, 0) + 1
+
+    def _boss_results(self, img):
+        norm = to_norm(img)
+        won = False
+        for row in range(1, self._boss_teams() + 1):
+            lineup = self.boss_lineups.setdefault(row, {})
+            result = lineup.get("result")
+            if not result:
+                result = RP.boss_result(norm, row)
+                if won and not RP.boss_button(norm, row):
+                    result = "unused"
+                if result:
+                    lineup["result"] = result
+                    team = lineup.get("team", [])
+                    if result != "unused":
+                        if result == "lose":
+                            hp = CD.defeat_hp(norm, row)
+                            lineup["how"] = ("protection" if CD.boss_protection_loss(self.r.book, norm, row, hp)
+                                             else ST.loss_cause([], hp))
+                        if self._multi_boss() and team:
+                            self._record_team_result(team, result == "win")
+                    self.r.log.event("boss_team_result", team_no=row, team=team, result=result,
+                                     attempt=self.attempt, enemy=self.enemy)
+            won = won or result == "win"
+
     def _remember(self, win: bool) -> None:
         """这一场打完：先记进这一趟的战斗清单（小结里列“输了哪几场、哪几场最慢”用）；再把上场的队和结果按敌人记进账本
         （账本只记极难和单队打的首领战，五个人都认得出名字的）。"""
+        if not self._multi_boss():
+            self._record_team_result(self.last_team, win, self.last_secs)
         self.recruit_win = win and not (self.battle_kind == "boss" and self._boss_teams() > 1)
         self.fights.append({"area": self.area, "kind": self.battle_kind, "enemy": self.enemy, "win": bool(win), "game": self.last_game,
                             "real": self.last_secs, "attempt": self.attempt, "how": None if win else self.lost_how})
@@ -2237,6 +2268,10 @@ class Walk:
         self.report_done = False                     # 新的一场：伤害报告还没看
         self.last_secs = self.last_game = None
         self.last_shares = {}
+        if boss_tab == 1:
+            for lineup in self.boss_lineups.values():
+                lineup.pop("result", None)
+                lineup.pop("how", None)
         if boss_tab <= 1:
             self.report_teams.clear()
             self.report_attempts.clear()
@@ -2264,6 +2299,8 @@ class Walk:
         where：win = 普通战 / 极难的 WIN!（按钮在右上角）；boss = 首领战的 WIN!（按钮在「第 N 战 胜利」那一行）；defeat = 战斗失败（右上角）。
         只点这一个按钮和弹窗里的「确认」；弹窗开着却认不出来、也关不掉，就停下（拿不准就停）。"""
         r = self.r
+        if self.battle_kind == "boss" and where in ("boss", "defeat"):
+            self._boss_results(s.img)
         if self.report_done or not self.report_on or self.team_mode != "role":
             return False
         norm = to_norm(s.img)
@@ -2276,7 +2313,7 @@ class Walk:
             if where == "defeat" and self.tries:
                 entry = self.tries[-1].get("by_team", {}).get(row)
                 if entry is not None and entry.get("how") is None:
-                    entry["how"] = ST.loss_cause([], CD.defeat_hp(s.img, row))
+                    entry["how"] = self.boss_lineups.get(row, {}).get("how")
             if row in self.report_teams:
                 self.faces, self.face_names, _ = self.report_teams[row]
             box = RP.result_row_box(row)
@@ -2366,6 +2403,10 @@ class Walk:
         role_map = self.report_teams[self.report_row][2] if self.report_row in self.report_teams else self.last_roles
         roles = [role_map.get(n) if n else None for n in names]
         result = "lose" if where == "defeat" else "win"
+        lineup = self.boss_lineups.get(self.report_row or 1, {}) if self.battle_kind == "boss" else {}
+        if self._multi_boss():
+            result = lineup.get("result", "unknown")
+        team_cause = lineup.get("how")
         sim_share = None
         stage = (self.last_est or {}).get("stage")
         if self.advisor is not None and stage and all(n and self.advisor.knows(n) for n in names) and len(names) == 5:
@@ -2376,17 +2417,17 @@ class Walk:
             except Exception:  # noqa: BLE001
                 sim_share = None
         res = self.dmg.record([n or "?/?" for n in names], roles, damage, sim_share, battle=self.battle_kind, enemy=self.enemy, area=self.area,
-                              team_no=self.report_row or 1, attempt=self.attempt, seconds=self.last_secs, game=self.last_game, result=result, shot=shot, unit=rep.unit,
+                              team_no=self.report_row or 1, attempt=self.attempt, seconds=self.last_secs, game=self.last_game, result=result, cause=team_cause, shot=shot, unit=rep.unit,
                               raw=[v for v, _b in rep.numbers][:30])
         self.dmg.save()
         if self.battle_kind == "boss" and self.boss_dmg is not None:
             res = self.boss_dmg.record([n or "?/?" for n in names], roles, damage, sim_share,
-                                              battle="boss", enemy=self.enemy, area=self.area, result=result,
+                                              battle="boss", enemy=self.enemy, area=self.area, result=result, cause=team_cause,
                                               attempt=self.attempt, game=self.last_game, seconds=self.last_secs,
                                               team_no=self.report_row or 1, shot=shot, unit=rep.unit)
             if not self.boss_dmg.save():
                 r.log.say("      BOSS 专项伤害记录未保存；原伤害记录不受影响。")
-            elif res["full"]:
+            elif res["full"] and team_cause != "protection":
                 r.log.say("      已单独学习这一队的 BOSS 伤害，供后续首领编队使用。")
         if self.battle_kind == "normal" and self.road_dmg is not None:
             res = self.road_dmg.record([n or "?/?" for n in names], roles, damage, sim_share,
@@ -2395,12 +2436,11 @@ class Walk:
                 r.log.say("      道中专项记录未保存，本场报告仍在总记录中。")
             self.chars.rates = self.road_dmg.rates()
         self.last_shares = dict(res["shares"]) if res["full"] else {}
-        team_cause = None
         if where == "defeat" and self.tries:
             entry = self.tries[-1]
             if self.battle_kind == "boss":
                 entry = entry.get("by_team", {}).get(self.report_row or 1, {})
-            team_cause = entry.get("how")
+            team_cause = team_cause or entry.get("how")
             if team_cause == "timeout" and not self.no_mech and res["full"]:
                 entry["weak"], entry["strong"] = self._weak_dealers(role_map)
         r.log.event("damage_report", ok=bool(res["full"]), shot=shot, team=names, roles=roles, attempt=self.attempt, cause=team_cause,
@@ -2464,9 +2504,7 @@ class Walk:
             self.fighting = False
             if not self.battle_logged:
                 r.log.event("battle_end", n=self.battles + 1, seconds=None, result="lose", battle=self.battle_kind, attempt=self.attempt,
-                            team=list(self.last_team), enemy=self.enemy, est=self.last_est)
-                self.chars.record_battle([n for n in self.last_team if "/" not in n], self.battle_kind, None, False)
-                self.chars.save()
+                            team=[] if self._multi_boss() else list(self.last_team), enemy=self.enemy, est=self.last_est)
                 self.last_secs = self.last_game = None
                 self._remember(False)
             self.battle_logged = False
@@ -2481,19 +2519,18 @@ class Walk:
             self.lost_how = ST.loss_cause(log, hp if page_how is not None else None)
             by_team = {}
             if self.battle_kind == "boss":
-                multi = len(self.boss_lineups) > 1
-                norm = to_norm(s.img)
+                self._boss_results(s.img)
+                multi = self._multi_boss()
                 for team_no, lineup in self.boss_lineups.items():
                     how = self.lost_how
-                    if multi:
-                        how = None
-                        if RP.boss_button(norm, team_no):
-                            how = ST.loss_cause([], CD.defeat_hp(s.img, team_no))
-                        r.log.say(f"      首领第 {team_no} 队：" + ({"timeout": "时间到", "wiped": "全队倒下"}.get(how, "未读到结算行")))
+                    if multi or lineup.get("how") == "protection":
+                        how = lineup.get("how")
+                    if not multi and how == "protection":
+                        self.lost_how = how
                     by_team[team_no] = {**lineup, "how": how}
                 if multi:
                     self.lost_how = None  # 战斗中的混合血量序列不能归给某一队
-            say = {"timeout": f"时间到了输的：还有 {sum(v > 0.02 for v in (hp or (log[-1][1] if log else [])))} 个人活着——伤害不够，不是扛不住。保命的人不动，输出换一批",
+            say = {"protection": "有人倒下，存活者中未看到输出：重试加强坦克或治疗", "timeout": f"时间到了输的：还有 {sum(v > 0.02 for v in (hp or (log[-1][1] if log else [])))} 个人活着——伤害不够，不是扛不住。保命的人不动，输出换一批",
                    "front": "从最前面开始一个个倒的（第一个人倒下时后面的人血还多）：下一次加一个站最前面的坦克",
                    "collapse": "全队血量一起崩的（第一个人倒下时其他人也没剩多少血）：下一次加治疗",
                    "wiped": "队伍倒了，但战斗中的血量没读清，分不出是怎么倒的：先加攻略点名的，没有就先坦克后治疗"}.get(self.lost_how or "")
@@ -2643,6 +2680,13 @@ class Walk:
                 missing_tags.difference_update(self.chars.tags(n))
             eligible = [i for i, role in enumerate(roles) if (need_tank and role == "tank")
                         or (need_heal and (role == "heal" or heals[i] >= 1)) or missing_tags & tags[i]] or None
+            preferred = (guide.get("sides") or [guide.get("side")])[0]
+            if not eligible and preferred in ST.SIDES:
+                dealers = sum(role in ST.DAMAGE and self.chars.atk(n) == preferred
+                              for n, (_, role) in self.run_units.items())
+                if dealers < 2:
+                    eligible = [i for i, role in enumerate(roles) if role in ST.DAMAGE and sides[i] == preferred
+                                and names[i] and names[i] not in self.run_units and not unlisted[i]] or None
             if guide:
                 wants = {"roles": [r for r, missing in (("tank", need_tank), ("heal", need_heal)) if missing],
                          "tags": sorted(missing_tags)}
@@ -3063,9 +3107,7 @@ class Walk:
                 self.battles += 1
                 if not self.battle_logged:
                     r.log.event("battle_end", n=self.battles, seconds=None, result="win", battle=self.battle_kind, attempt=self.attempt,
-                                team=list(self.last_team), enemy=self.enemy, est=self.last_est)
-                    self.chars.record_battle([n for n in self.last_team if "/" not in n], self.battle_kind, None, True)
-                    self.chars.save()
+                                team=[] if self._multi_boss() else list(self.last_team), enemy=self.enemy, est=self.last_est)
                     self.last_secs = self.last_game = None
                     self._remember(True)
                 self.battle_logged = False

@@ -584,7 +584,7 @@ def first_try(tweak: dict[str, Any] | None) -> dict[str, Any] | None:
 
 FRONT_REST = 0.6        # 第一个人倒下时，其他人平均还剩这么多血以上：算“从前面一个个倒”（要坦克）；不到：算“全队一起崩”（要治疗）
 BACK_FULL = 0.9         # 第二个人倒下时，还没轮到站最前面的那些人平均血量不到这么多：后排也一直在掉血，是全队一起掉的（要治疗）
-LOSS_CN = {"front": "从最前面开始一个个倒的", "collapse": "全队血量一起崩的", "wiped": "队伍倒了（没看清是怎么倒的）", "timeout": "时间到了、人还活着"}
+LOSS_CN = {"protection": "有人倒下，存活者中未看到输出", "front": "从最前面开始一个个倒的", "collapse": "全队血量一起崩的", "wiped": "队伍倒了（没看清是怎么倒的）", "timeout": "时间到了、人还活着"}
 
 
 def loss_cause(samples: Sequence[tuple[float, Sequence[float]]], final: Sequence[float] | None = None) -> str | None:
@@ -665,6 +665,8 @@ def plan_retry(kind: str, tries: Sequence[dict[str, Any]], tweak: dict[str, Any]
             avoid = {n: RETRY_AVOID for n in (t.get("team") or []) if n}       # 只看最近没打完的那一队（不累加：不然越换越弱）
             notes.append("上一次时间到了没打完：保命的人不动，输出换一批")
             continue
+        if how == "protection":
+            avoid.clear()
         want = "tank" if how == "front" else "heal" if how == "collapse" else next((r for r in named + ["tank", "heal"] if r not in guards), None)
         if how == "front" and isinstance(t.get("front_tough"), (int, float)):      # 那一次是肉的前排在顶、没顶住：记下她有多肉
             tw["front_lost"] = max(float(tw.get("front_lost") or 0.0), float(t["front_tough"]))

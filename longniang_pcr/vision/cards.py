@@ -206,6 +206,19 @@ def defeat_hp(img: np.ndarray, team: int = 1) -> list[float]:
     return out
 
 
+def boss_protection_loss(book: PageBook, norm: np.ndarray, team: int, hp: list[float]) -> bool:
+    """有队员倒下且活着的人里看不到输出，优先补保护；职能图标直接读各自血条上方。"""
+    if not any(v > 0.02 for v in hp) or all(v > 0.02 for v in hp):
+        return False
+    for i, value in enumerate(hp):
+        if value > 0.02:
+            role, _ = _classify(book, norm, 358 + 117 * i, 233 + 162 * (team - 1),
+                                "ico_role_", ROLES, scale=0.86)
+            if role in ("attack", "break"):
+                return False
+    return True
+
+
 BATTLE_HP = (261, 160, 120, 666, 674)       # 战斗画面底下那排头像的血条：最左边那格的 x、每格间隔、血条宽、上下两行（1280×720）
 
 

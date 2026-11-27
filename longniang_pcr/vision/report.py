@@ -144,9 +144,14 @@ def is_open(norm: np.ndarray) -> bool:
     return bool(b > 170 and b - r > 90 and 80 < g < 180 and float(blank.mean()) > 248 and float(blank.std()) < 4)
 
 
-def boss_button(norm: np.ndarray) -> bool:
-    """首领战 WIN! 上「第 N 战 胜利」那一行右边有没有蓝色的「伤害报告」按钮（看颜色：蓝底、中间有一截白字）。"""
+def result_row_box(team: int) -> tuple[int, int, int, int]:
     x, y, w, h = BTN_BOSS
+    return x, y + 162 * (team - 1), w, h
+
+
+def boss_button(norm: np.ndarray, team: int = 1) -> bool:
+    """首领战 WIN! 上「第 N 战 胜利」那一行右边有没有蓝色的「伤害报告」按钮（看颜色：蓝底、中间有一截白字）。"""
+    x, y, w, h = result_row_box(team)
     roi = norm[y:y + h, x:x + w].astype(np.int32)
     b, g, r = roi.reshape(-1, 3).mean(0)
     white = ((roi.min(axis=2) > 215).mean(axis=0) > 0.2)          # 哪几列有白字

@@ -535,12 +535,12 @@ class CharBook:
         """游戏给这个角色标的职能不合用时，实际按哪种职能用（比如标着治疗、其实是强力增益的）；没有改写返回 None。"""
         return self.roles_as.get(name or "")
 
-    def power(self, name: str | None) -> float:
+    def power(self, name: str | None, rates: dict[str, float] | None = None) -> float:
         """这个角色的强度（数字越大越强，没有上限）：强度表里的数 + 「更新角色」发现的新专武 / 六星加的档数。不认识的是 1。"""
         if not name:
             return 1
         p = max(1.0, float(self.powers.get(name, 1)) + float(self.bumps.get(name, 0)))
-        k = (getattr(self, "rates", None) or {}).get(name)      # 真机伤害校出来的“输出比重”（只有输出角色有，见 damage.py）
+        k = ((getattr(self, "rates", None) or {}) if rates is None else rates).get(name)
         return max(1.0, round(p * DM.power_factor(k), 2)) if k else p
 
     def hit(self, name: str | None) -> str | None:

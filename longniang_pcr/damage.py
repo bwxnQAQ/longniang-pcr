@@ -34,6 +34,7 @@ class DamageBook:
         self.path = Path(path) if path else None
         self.chars: dict[str, dict[str, Any]] = {}
         self.fights: list[dict[str, Any]] = []
+        self._extreme_cache = {}
         if self.path and self.path.exists():
             try:
                 d = json.loads(self.path.read_text(encoding="utf-8"))
@@ -43,6 +44,45 @@ class DamageBook:
                 self.chars, self.fights = {}, []
 
     # ---- 读 ----
+    def extreme_weights(self, enemy: str | None) -> dict[str, dict[str, float]]:
+        if enemy in self._extreme_cache:
+            return self._extreme_cache[enemy]
+        overall, specific = DamageBook(), DamageBook()
+        counts = {book: {"rate": {}, "sim": {}} for book in (overall, specific)}
+        for fight in self.fights:
+            if fight.get("battle") != "extreme" or not fight.get("shares"):
+                continue
+            books = (overall, specific) if enemy and fight.get("enemy") == enemy else (overall,)
+            for book in books:
+                result = book.record(fight["team"], fight["roles"], fight["damage"], fight.get("sim_shares"))
+                for field, samples in counts[book].items():
+                    for name in result[field]:
+                        samples[name] = samples.get(name, 0) + 1
+        weights = {"rate": {}, "sim": {}}
+        for book in (overall, specific):
+            for field, samples in counts[book].items():
+                weights[field].update({name: book.chars[name][field] for name, count in samples.items() if count >= 2})
+        self._extreme_cache[enemy] = weights
+        return weights
+
+    def boss_history(self) -> DamageBook | None:
+        if not self.path:
+            return None
+        path = self.path.with_name("damage_boss.json")
+        book = DamageBook(path)
+        if not path.exists():
+            for fight in self.fights:
+                if fight.get("battle") != "boss":
+                    continue
+                info = dict(fight)
+                team, roles, damage = (info.pop(key) for key in ("team", "roles", "damage"))
+                predicted = info.pop("sim_shares", None)
+                info.pop("shares", None)
+                book.record(team, roles, damage, predicted, **info)
+            if not book.save():
+                raise OSError(f"Cannot initialize {path}")
+        return book
+
     def rate(self, name: str | None) -> float:
         return float((self.chars.get(name or "") or {}).get("rate", 1.0))
 
@@ -107,6 +147,8 @@ class DamageBook:
                     new = round(_clip(old * ratio[n] / scale, *LIMIT), 3)
                     self.chars[n]["sim"] = new
                     out["sim"][n] = (round(old, 3), new)
+        if info.get("battle") == "extreme" or (len(self.fights) >= KEEP and self.fights[0].get("battle") == "extreme"):
+            self._extreme_cache.clear()
         self.fights.append(fight)
         del self.fights[:-KEEP]
         return out

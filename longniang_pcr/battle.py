@@ -155,6 +155,15 @@ def _code_kind(code: Any) -> str:
     return "ub" if code in ("ub", "sp_ub") else "attack" if code == 1 else "skill"
 
 
+UNLISTED_RATIOS = {"hp": 0.625, "atk": 0.616, "matk": 0.616, "pdef": 0.745, "mdef": 0.739, "crit": 0.648}
+UNLISTED_MEASURED = {
+    "大和": {"hp": 92370, "atk": 26951, "matk": 20, "pdef": 2086, "mdef": 1859, "crit": 626, "mcrit": 0,
+           "dodge": 21, "whp": 890, "wtp": 233},
+    "克莉丝提娜（狂野）": {"hp": 37919, "atk": 45789, "matk": 0, "pdef": 703, "mdef": 597, "crit": 1960, "mcrit": 0,
+                    "dodge": 20, "whp": 2045, "wtp": 255, "ls": 9, "hprec": 20, "tpup": 40, "tpred": 15, "acc": 62},
+}
+
+
 class Battle:
     def __init__(self, data: Data, team: list[str], stage: str, mods: dict[str, float] | None = None, limit: float = 90.0, seed: int = 7):
         self.data, self.limit = data, limit
@@ -171,6 +180,10 @@ class Battle:
         for n in team:
             u = data.units[n]
             st = dict(u["st"])
+            if n in self.mods.get("unlisted", ()):
+                st.update({key: round(st[key] * ratio) for key, ratio in UNLISTED_RATIOS.items() if key in st})
+                st.update(UNLISTED_MEASURED.get(n, {}))
+                st.update(lv=320, rank=34, star=3)
             st["hp"] = st.get("hp", 1) * (1 + hp_pct / 100.0) * self.mods.get("hp_mult", 1.0)
             for k in ("atk", "matk"):
                 st[k] = st.get(k, 0) * (1 + atk_pct / 100.0)

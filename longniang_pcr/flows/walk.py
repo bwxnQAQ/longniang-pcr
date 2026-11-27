@@ -314,6 +314,11 @@ class Walk:
         self.pass_unsure = bool(adopt)               # 换过日 / 中途接手：出发前后的通行证数字没法比，就不比了
         # 真机伤害（2026-11-24 用户定的：测试的时候每场打完看一下输出，输出角色谁伤害高就调高比重）。没给 = 不看
         self.dmg = damage
+        self.report_teams = {}
+        self.report_attempts = {}
+        self.report_row = 0
+        self.report_waits = 0
+        self.boss_dmg = damage.boss_history() if damage is not None else None
         self.report_on = bool(damage_report) and damage is not None
         self.report_done = True                      # 这一场的伤害报告看过了没有（开打时置回 False）
         self.faces: list[np.ndarray | None] = []     # 开打前成员栏里每个位置的头像（打完去伤害报告里找同一张脸）
@@ -1596,6 +1601,10 @@ class Walk:
                     return
                 tb["eff"] = [c.fp for c in cards if c.fp is not None]
             eff = tb["eff"] or []
+            rates = (self.boss_dmg.rates() if self.boss_dmg is not None else {}) if self.battle_kind == "boss" else None
+            if self.battle_kind == "extreme":
+                rates = self.dmg.extreme_weights(self.enemy)["rate"] if self.dmg is not None else {}
+            owned = self.chars.owned()
             units = []
             for i, (tab, k, c) in enumerate(tb["pool"]):
                 if c.busy:
@@ -1604,9 +1613,10 @@ class Walk:
                 if name:
                     self.chars.refine(name, c.fp, sc)
                 units.append(ST.Unit((tab, k, c.cx, c.cy, i), c.role, c.attr, c.selected, order=i, name=name,
+                                     unlisted=bool(owned and name and name not in owned),
                                      tags=self.chars.tags(name), atk=self.chars.atk(name), base=CH.base_of(name) if name else None,
                                      hit=self.chars.hit(name), pos=self.chars.pos(name),
-                                     func=self.chars.role_as(name), aid=self.chars.aid(name), power=self.chars.power(name),
+                                     func=self.chars.role_as(name), aid=self.chars.aid(name), power=self.chars.power(name, rates),
                                      heal=self.chars.heal(name), tough=self.chars.tough(name), pvp=self.chars.is_pvp(name),
                                      tough_p=self.chars.tough_vs(name, "phys"), tough_m=self.chars.tough_vs(name, "magic"),
                                      effective=any(CD.same_card(c.fp, e) >= CD.FP_SAME for e in eff)))
@@ -1656,6 +1666,9 @@ class Walk:
                     r.log.say(line)
                 r.log.event("estimate", battle=self.battle_kind, enemy=self.enemy, attempt=self.attempt, rule=rule_names, **est["event"])
             tb["plan"] = plan
+            outside = [unit.name for unit in units if unit.unlisted]
+            if outside:
+                r.log.say("      名单外已降权：" + "、".join(outside) + "；仍上场：" + ("、".join(unit.name for unit in plan.team if unit.unlisted) or "无"))
             tabs_order = {t: i for i, t in enumerate(tb["tabs"])}
             by_tab = lambda u: (tabs_order.get(u.key[0], 0), u.key[1])           # noqa: E731  同一个页签、同一屏里的放一起点，少翻
             tb["queue"] = [("drop", u) for u in sorted(plan.drop, key=by_tab)] + [("add", u) for u in sorted(plan.add, key=by_tab)]
@@ -1781,6 +1794,12 @@ class Walk:
                     return
                 card = self._find_card(s, tb, u)
                 ok = card is not None and card.selected == (act == "add")
+                if not ok and act == "add":
+                    target_fp = tb["pool"][u.key[4]][2].fp
+                    if any(member is not None and (CD.same_card(member.fp, target_fp) >= CD.FP_SAME or
+                           (u.name and self.chars.identify(member.fp, member.role, member.attr)[0] == u.name)) for member in members):
+                        ok = True
+                        r.log.say("      已从成员栏头像确认上场，不重复点击。")
                 if not ok:
                     tb["tries"] += 1
                     if tb["tries"] <= 3:             # 对勾要半秒左右才变：再等等
@@ -1847,8 +1866,7 @@ class Walk:
             return
         if is_boss and boss < 3:
             note = f"{n_mem} 人" if fill else "留空"
-            if boss == 1:
-                self._faces(s, boss_tab=1)
+            self._faces(s, boss_tab=boss)
             if r.tap(s, BOX["team.start"], f"队伍{boss + 1}（队伍 {boss}：{note}）") != "changed":
                 self.team_changed = self.equip_done = self.auto_done = False
             r.pause(self.beat + 0.3 * self.patience)
@@ -2038,7 +2056,7 @@ class Walk:
 
         seeds += variants(base, (None, "phys", "magic"))
         lost = [t.get("team") or [] for t in self.tries] + (self.wins.lost(self.enemy) if self.wins is not None else [])
-        mods = self._mods()
+        mods = self._mods([unit.name for unit in known])
         cache: dict = {}
         try:
             got = adv.search(known, stage, mods, seeds, lost=lost, wins=self.run_wins, cache=cache)
@@ -2135,7 +2153,7 @@ class Walk:
             return None
         if self.tier.guards:                         # 保通关档自己有一套带人的规矩（第一次就带坦克、治疗），不套用别的档位赢过的队
             return None
-        by = {u.name: u for u in units if u.name}
+        by = {u.name: u for u in units if u.name and not u.unlisted}
         rec = self.wins.best(self.enemy, set(by), skip=[set(t.get("team") or []) for t in self.tries])
         if rec is None:
             return None
@@ -2166,10 +2184,16 @@ class Walk:
                          est=est, how=None if win else self.lost_how)
         self.wins.save()
 
-    def _mods(self) -> dict[str, Any]:
+    def _mods(self, names: list[str]) -> dict[str, Any]:
         """这一场推演用的条件：遗物、输过几次、按真机伤害校出来的每个角色的校正。"""
         mods: dict[str, Any] = AD.mods_for(self.series, self.attempt + self.tier.caution)     # 第三、四档：往坏处多想几档
-        sims = self.dmg.sims() if self.dmg is not None else {}
+        owned = self.chars.owned()
+        if owned:
+            mods["unlisted"] = sorted({name for name in names if name and name not in owned})
+        damage_book = self.boss_dmg if self.battle_kind == "boss" else self.dmg
+        sims = damage_book.sims() if damage_book is not None else {}
+        if self.battle_kind == "extreme":
+            sims = self.dmg.extreme_weights(self.enemy)["sim"] if self.dmg is not None else {}
         if sims:
             mods["unit_out"] = sims
         return mods
@@ -2182,8 +2206,10 @@ class Walk:
         self.report_done = False                     # 新的一场：伤害报告还没看
         self.last_secs = self.last_game = None
         self.last_shares = {}
-        if boss_tab >= 2 and self.faces_tab == 1 and any(f is not None for f in self.faces):
-            return True
+        if boss_tab <= 1:
+            self.report_teams.clear()
+            self.report_attempts.clear()
+            self.report_row = self.report_waits = 0
         self.faces, self.face_names, self.faces_tab = [], [], boss_tab
         if not self.report_on or self.team_mode != "role":
             return True
@@ -2198,6 +2224,8 @@ class Walk:
         except Exception as e:  # noqa: BLE001  这一步出什么错都不该挡住开打
             self.faces, self.face_names = [], []
             self.r.log.say(f"      （记成员栏头像时出错：{type(e).__name__}: {e}——这一场不看伤害报告）")
+        if boss_tab and any(face is not None for face in self.faces):
+            self.report_teams[boss_tab] = (self.faces, self.face_names, dict(self.last_roles))
         return True
 
     def _damage_report(self, s: Seen, where: str = "win") -> bool:
@@ -2207,23 +2235,43 @@ class Walk:
         r = self.r
         if self.report_done or not self.report_on or self.team_mode != "role":
             return False
-        if not any(f is not None for f in self.faces):
-            self.report_done = True
-            return False
-        if where == "boss":
-            if not RP.boss_button(to_norm(s.img)):   # 还没显示出来：这一轮先不看，下一轮再瞧
-                return False
-            box = RP.BTN_BOSS
+        norm = to_norm(s.img)
+        row_layout = where in ("boss", "defeat")
+        rows = sorted(self.report_teams) if self.battle_kind == "boss" else [1]
+        row = next((team for team in rows if row_layout and self.report_attempts.get(team, 0) < 2
+                    and RP.boss_button(norm, team)), None)
+        if row is not None:
+            self.report_row = row
+            if row in self.report_teams:
+                self.faces, self.face_names, _ = self.report_teams[row]
+            box = RP.result_row_box(row)
         else:
+            if self.report_attempts or where == "boss" or (where == "defeat" and len(rows) > 1):
+                if self.report_waits < 2 and any(self.report_attempts.get(team, 0) < 2 for team in rows):
+                    self.report_waits += 1
+                    r.pause(0.5)
+                    return True
+                self.report_done = True
+                return False
             seen, note = RP.button_seen(s.img, r.book)
             if not seen:                             # 这张画面上没有「伤害报告」（已经翻到「获得道具」那张了，或者按钮没认出来）
+                if where == "defeat" and self.report_waits < 2:
+                    self.report_waits += 1
+                    r.pause(0.5)
+                    return True
                 self.report_done = True
                 r.log.say(f"      这张画面右上角没看到「伤害报告」（{note}），这一场不看伤害。")
                 r.log.event("damage_report", ok=False, why="no_button", note=note, where=where)
                 return False
             box = RP.BTN_WIN
-        self.report_done = True                      # 一场只看一次
-        if r.tap(s, box, "伤害报告（看这一场每个人打了多少）") == "changed":
+        if not any(face is not None for face in self.faces):
+            self.report_done = True
+            return False
+        if row is None:
+            self.report_done = True
+        else:
+            self.report_attempts[row] = self.report_attempts.get(row, 0) + 1
+        if r.tap(s, box, f"伤害报告（第 {row or 1} 队）") == "changed":
             return True
         back = ("defeat",) if where == "defeat" else ("win", "win_next", "win_crown")
         rep, s2, last = None, s, None
@@ -2275,24 +2323,36 @@ class Walk:
 
     def _record_damage(self, rep: "RP.Report", shot: str, where: str = "win") -> None:
         r = self.r
+        if self.report_row:
+            self.report_attempts[self.report_row] = 2
         slots = [k for k, f in enumerate(self.faces) if f is not None]          # 空位不算人
         names = [self.face_names[k] if k < len(self.face_names) else None for k in slots]
         damage = [rep.damage[k] if k < len(rep.damage) else None for k in slots]
-        roles = [self.last_roles.get(n) if n else None for n in names]
+        role_map = self.report_teams[self.report_row][2] if self.report_row in self.report_teams else self.last_roles
+        roles = [role_map.get(n) if n else None for n in names]
         result = "lose" if where == "defeat" else "win"
         sim_share = None
         stage = (self.last_est or {}).get("stage")
         if self.advisor is not None and stage and all(n and self.advisor.knows(n) for n in names) and len(names) == 5:
             try:
-                _v, nom, _p = self.advisor.run([n for n in names if n], stage, self._mods())
+                _v, nom, _p = self.advisor.run([n for n in names if n], stage, self._mods(names))
                 tot = float(sum(nom.dealt.values()))
                 sim_share = {n: nom.dealt.get(n, 0.0) / tot for n in names if n} if tot > 0 else None
             except Exception:  # noqa: BLE001
                 sim_share = None
         res = self.dmg.record([n or "?/?" for n in names], roles, damage, sim_share, battle=self.battle_kind, enemy=self.enemy, area=self.area,
-                              attempt=self.attempt, seconds=self.last_secs, game=self.last_game, result=result, shot=shot, unit=rep.unit,
+                              team_no=self.report_row or 1, attempt=self.attempt, seconds=self.last_secs, game=self.last_game, result=result, shot=shot, unit=rep.unit,
                               raw=[v for v, _b in rep.numbers][:30])
         self.dmg.save()
+        if self.battle_kind == "boss" and self.boss_dmg is not None:
+            boss_result = self.boss_dmg.record([n or "?/?" for n in names], roles, damage, sim_share,
+                                              battle="boss", enemy=self.enemy, area=self.area, result=result,
+                                              attempt=self.attempt, game=self.last_game, seconds=self.last_secs,
+                                              team_no=self.report_row or 1, shot=shot, unit=rep.unit)
+            if not self.boss_dmg.save():
+                r.log.say("      BOSS 专项伤害记录未保存；原伤害记录不受影响。")
+            elif boss_result["full"]:
+                r.log.say("      已单独学习这一队的 BOSS 伤害，供后续首领编队使用。")
         self.chars.rates = self.dmg.rates()
         r.log.event("damage_report", ok=bool(res["full"]), shot=shot, team=names, roles=roles, shares={n: round(v, 4) for n, v in res["shares"].items()},
                     sim_shares={n: round(v, 4) for n, v in (sim_share or {}).items()}, rate=res["rate"], sim=res["sim"], where=where, result=result,
@@ -2383,19 +2443,19 @@ class Walk:
                         hp_log=[[t, v] for t, v in log[:: max(1, len(log) // 40)]])
             self.tb = None
             self.team_changed = self.equip_done = self.auto_done = False
-            self.defeat_report = self.lost_how == "timeout" and not self.no_mech     # 伤害不够输的：点「重新挑战」之前先看伤害报告，下一次换谁有个依据（不重打的就不看了）
+            self.defeat_report = True
             if self.attempt <= self._retries() and self.battle_kind == "boss" and (self.area == 5 or self.tier.boss_more):
                 self.boss_extra += 1                 # 最终首领：下一次多编一队。区域 3 首领第一、二档只用一队打（凹分要一队过），第三、四档输了可以多编
         if self.defeat_report:
-            self.defeat_report = False
             if self._damage_report(s, "defeat"):
-                weak, strong = self._weak_dealers()
+                weak, strong = self._weak_dealers() if self.lost_how == "timeout" and not self.no_mech else ([], [])
                 if self.tries and (weak or strong):
                     self.tries[-1]["weak"], self.tries[-1]["strong"] = weak, strong
                     sh = self.last_shares
                     r.log.say("      伤害不够，看了伤害报告：" + ("、".join(f"{n}（{sh.get(n, 0) * 100:.0f}%）" for n in weak) + " 打得少，下一次换掉" if weak else "输出角色之间差不多")
                               + ("；" + "、".join(f"{n}（{sh.get(n, 0) * 100:.0f}%）" for n in strong) + " 打得多，留着" if strong else "") + "。")
                 return
+            self.defeat_report = False
         kind = KIND_CN.get(self.battle_kind, self.battle_kind) + (f"·{self.enemy}" if self.enemy else "")
         if self.attempt <= self._retries():
             r.log.say(f"      这一场（{kind}）输了，已经打了 {self.attempt} 次。换一套队伍再打（最多再打 {self._retries() - self.attempt + 1} 次）。")
@@ -2463,20 +2523,27 @@ class Walk:
                 r.pause(0.5 * self.patience)
                 return
             names = self._recruit_names(s, cards)
-            show = [f"{n}[{c.text}]" if n else c.text for n, c in zip(names, cards)]
+            saved = [self.chars.roster.get(name, {}) if name else {} for name in names]
+            attrs = [card.attr or record.get("attr") for card, record in zip(cards, saved)]
             # 职能按实际用法算（有的强力增益被游戏标成了治疗）；增益、强化、减益型看她帮的是物理队还是法队
-            roles = [self.chars.role_as(n) or c.role for n, c in zip(names, cards)]
+            roles = [self.chars.role_as(name) or card.role or record.get("role") for name, card, record in zip(names, cards, saved)]
+            show = [f"{name}[{CD.ROLE_CN[role]}/{CD.ATTR_CN[attr]}]" if name else card.text
+                    for name, card, role, attr in zip(names, cards, roles, attrs)]
             sides = [self.chars.atk(n) if (r in ST.DAMAGE or not self.chars.aid(n)) else self.chars.aid(n) for n, r in zip(names, roles)]
             wants = {"roles": [x for x in (self.boss_wants.get("roles") or []) if not (x == "heal" and self.roster_heal)],      # 名单里已经有“有奶”的人就不用再专门拿奶
                      "tags": [t for t in (self.boss_wants.get("tags") or []) if t not in self.roster_tags]}
-            pick, why = ST.choose_recruit([(r, c.attr) for r, c in zip(roles, cards)], self.roster, tags=[self.chars.tags(n) for n in names],
+            owned = self.chars.owned()
+            unlisted = [bool(owned and name and name not in owned) for name in names]
+            pick, why = ST.choose_recruit(list(zip(roles, attrs)), self.roster, tags=[self.chars.tags(n) for n in names],
                                           atks=sides, side=self.recruit_side, wants=wants,
                                           powers=[1.0 if self.chars.is_pvp(n) else self.chars.power(n) for n in names],     # 纯竞技场用的角色：招募时按最低强度算
-                                          heals=[self.chars.heal(n) for n in names])
+                                          heals=[self.chars.heal(n) for n in names], unlisted=unlisted)
+            if any(unlisted):
+                why += "；名单外已降权：" + "、".join(name for name, outside in zip(names, unlisted) if outside)
             label = f"选择第 {pick + 1} 个（{show[pick]}，{why}；三个是 {'、'.join(show)}）"
-            r.log.event("recruit", cards=[[c.role, c.attr] for c in cards], names=names, pick=pick, roster=dict(self.roster),
+            r.log.event("recruit", cards=[[c.role, c.attr] for c in cards], resolved=list(zip(roles, attrs)), names=names, pick=pick, roster=dict(self.roster),
                         atks=[self.chars.atk(n) for n in names], side=self.recruit_side, power=[self.chars.power(n) for n in names], wants=wants)
-            after = ("role", roles[pick], names[pick], cards[pick].attr)
+            after = ("role", roles[pick], names[pick], attrs[pick])
         else:
             marks = CD.mark_attrs(r.book, s.img)
             if any(m is not None for m in marks):
@@ -2516,7 +2583,8 @@ class Walk:
         cb = self.chars
         pool = [(cb.attrs.get(n) or (cb.roster.get(n) or {}).get("attr"), cb.power(n), cb.role_as(n) or (cb.roster.get(n) or {}).get("role"))
                 for n in owned if n not in self.run_units]
-        return ST.attr_values(pool, list(self.run_units.values()) + list(self.run_unnamed))
+        outside = [attr for name, attr in cb.attrs.items() if name not in owned and name not in self.run_units]
+        return ST.attr_values(pool, list(self.run_units.values()) + list(self.run_unnamed), outside)
 
     # ---- 商店 ----
     def _shop_note(self, sh: dict[str, Any]) -> str:
@@ -2998,7 +3066,7 @@ class Walk:
             elif page == "battle" and self.seen_pick3:
                 self._watch_battle()
             elif page == "win_next" and self.seen_pick3:
-                if not self._damage_report(s):
+                if not self._damage_report(s, "boss" if self.battle_kind == "boss" else "win"):
                     self._tap_wait(s, BOX["win.next"], "下一步")
             elif page == "win" and self.seen_pick3:
                 self.win_wait += 1                   # 「下一步」要过一会儿才出来；等了两轮还没有就点它该在的位置

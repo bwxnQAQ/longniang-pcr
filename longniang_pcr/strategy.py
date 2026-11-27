@@ -215,6 +215,8 @@ class Unit:
     tough_p: float | None = None                        # 只算挨物理伤害时的耐打程度（data/characters.json 的 tough_phys，一般坦克 = 1）；没有资料是 None，用 tough 代替
     tough_m: float | None = None                        # 只算挨魔法伤害时的（tough_magic）
 
+    unlisted: bool = False
+
     @property
     def kind(self) -> str | None:
         """编队时算哪种职能：有改写用改写的，没有就是游戏标的。"""
@@ -473,6 +475,8 @@ def team_score(team: Sequence[Unit], profile: str, weak: str | None = None, twea
         if u.selected:
             total += KEEP
         total -= 0.01 * u.order
+        if u.unlisted:
+            total -= 26.0
     healers = sum(1 for u in team if can_heal(u))
     if len(team) >= 3 and not any(u.kind in DAMAGE for u in team):
         total -= NO_DEALER
@@ -852,7 +856,7 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
                    attr_order: Sequence[str] = MARK_ORDER, tags: Sequence[frozenset] | None = None,
                    atks: Sequence[str | None] | None = None, side: str | None = None,
                    powers: Sequence[float] | None = None, wants: dict[str, Any] | None = None,
-                   heals: Sequence[float] | None = None) -> tuple[int, str]:
+                   heals: Sequence[float] | None = None, unlisted: Sequence[bool] | None = None) -> tuple[int, str]:
     """战斗后三选一。cands = [(职能, 属性), …]；tags = 每个人的特点、atks = 物理还是魔法（认出名字才有）；
     heals = 每个人会不会给全队回血（≥1 算有奶：后面的首领要奶时，有奶的强力角色和纯治疗一样算数）；
     side = 现在在凑物理队还是法队（roster_side）；powers = 每个人的强度档；
@@ -882,7 +886,8 @@ def choose_recruit(cands: Sequence[tuple[str | None, str | None]], have: dict[st
 
     def rank(i: int) -> tuple:
         role, attr = cands[i]
-        return ((want.index(role) if role in want else 99) - boost(i), off(i), -powers[i], attr_order.index(attr) if attr in attr_order else 9, i)
+        penalty = 4.0 if unlisted and unlisted[i] else 0.0
+        return ((want.index(role) if role in want else 99) - boost(i) + penalty, off(i), -powers[i], attr_order.index(attr) if attr in attr_order else 9, i)
 
     best = min(range(len(cands)), key=rank)
     role, attr = cands[best]
@@ -932,10 +937,11 @@ MARK_TEAM = 0.12        # 选印记属性：这一局里已经有这个属性的
 MARK_GUARD = 0.5        # 账号里那个属性的坦克、纯治疗：平时用不上，算平均强度时只算一半分量
 
 
-def attr_values(owned: Iterable[tuple[str | None, float, str | None]], in_run: Iterable[tuple[str | None, str | None]] = ()) -> dict[str, dict[str, float]]:
+def attr_values(owned: Iterable[tuple[str | None, float, str | None]], in_run: Iterable[tuple[str | None, str | None]] = (),
+                unlisted: Iterable[str] = ()) -> dict[str, dict[str, float]]:
     """连结印记选哪个属性，按账号主人有哪些角色来算（2026-11-19 用户定的）。
     owned = 账号里还没进这一局的角色 [(属性, 强度, 职能)]——随机印记就是从这里面抽；in_run = 这一局已经有的角色 [(属性, 职能)]。
-    每个属性的分 = 那个属性还能抽到的角色的平均强度（坦克、纯治疗只算一半分量）+ 这一局已经有几个这个属性的非保命角色 × MARK_TEAM（凑同属性）。
+    按剩余图鉴人数估算抽取概率：名单内取加权平均强度，名单外按 1 分；再加本局同属性成队奖励。
     返回 {属性: {"value": 分, "mean": 平均强度, "left": 还能抽到几个, "have": 这一局已经有几个}}；一个都抽不到的属性不在里面。"""
     pools: dict[str, list[tuple[float, float]]] = {}
     for attr, power, kind in owned:
@@ -946,10 +952,17 @@ def attr_values(owned: Iterable[tuple[str | None, float, str | None]], in_run: I
         if attr in ATTRS and kind not in GUARD:
             have[attr] = have.get(attr, 0) + 1
     out: dict[str, dict[str, float]] = {}
-    for attr, lst in pools.items():
-        mean = sum(p * w for p, w in lst) / sum(w for _p, w in lst)
+    missing: dict[str, int] = {}
+    for attr in unlisted:
+        if attr in ATTRS:
+            missing[attr] = missing.get(attr, 0) + 1
+    for attr in pools.keys() | missing.keys():
+        lst = pools.get(attr, [])
+        mean = sum(p * w for p, w in lst) / sum(w for _p, w in lst) if lst else 0.0
+        outside = missing.get(attr, 0)
+        expected = (len(lst) * mean + outside * 1.0) / (len(lst) + outside)
         n = have.get(attr, 0)
-        out[attr] = {"value": round(mean + MARK_TEAM * min(n, 6), 3), "mean": round(mean, 2), "left": len(lst), "have": n}
+        out[attr] = {"value": round(expected + MARK_TEAM * min(n, 6), 3), "mean": round(mean, 2), "left": len(lst), "unlisted": outside, "have": n}
     return out
 
 
@@ -960,7 +973,7 @@ def choose_mark(attrs: Sequence[str | None], order: Sequence[str] = MARK_ORDER,
     rank = lambda i: (order.index(attrs[i]) if attrs[i] in order else 9, i)       # noqa: E731
     if values and any(a in values for a in attrs):
         best = max(range(len(attrs)), key=lambda i: ((values.get(attrs[i] or "") or {}).get("value", -1.0), [-x for x in rank(i)]))
-        say = "；".join(f"{ATTR_CN_S[a]} {values[a]['value']:.2f}（账号里还能抽到 {int(values[a]['left'])} 个、平均强度 {values[a]['mean']:.2f}，这一局已经有 {int(values[a]['have'])} 个）"
+        say = "；".join(f"{ATTR_CN_S[a]} {values[a]['value']:.2f}（剩余名单内 {int(values[a]['left'])} 个，名单外 {int(values[a].get('unlisted', 0))} 个按1分估算，本局已有 {int(values[a]['have'])} 个）"
                        for a in attrs if a in values)
         return best, "按账号里各属性的角色算：" + say
     best = min(range(len(attrs)), key=rank)

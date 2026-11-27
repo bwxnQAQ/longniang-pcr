@@ -496,13 +496,14 @@ def main() -> int:
             took = bool(res.get("took_over"))            # 这一局是接手的：是哪个公会、出发前有几张门票，工具都没看到
             pass_note = ("这一局是接手的，出发前的门票数量我没看到，没法比（撤退会把这一局的门票退回，可以看一眼）" if took
                          else f"门票没少（{res['pass_note']}）" if res.get("pass_note") else "门票数量和出发前一样")
+            score = res.get("result_score") if res.get("cleared") else res.get("score_if_cleared") if res.get("at_final") else None
             rows.append({"n": len(rows) + 1, "guild": "（接手的一局）" if took else guild, "fights": res.get("fights") or [], "minutes": res.get("seconds", 0) / 60.0, "moves": len(res["moves"]), "battles": res["battles"],
-                         "losses": res.get("losses"), "score": res.get("score_if_cleared") if (res.get("cleared") or res.get("at_final")) else None,
+                         "losses": res.get("losses"), "score": score,
                          "result": "打通了" if res.get("cleared") else "停在最终首领跟前" if res.get("hold") else "没到分，撤退重打" if res.get("settled") == "redo"
                          else "走到最终首领跟前，撤退" if res.get("at_final")
                          else f"撤退（{res.get('why') or '没写原因'}）"})
             if (res.get("cleared") or res.get("at_final")) and not took:      # 走完了的一局：按公会记成绩（刷分挑公会用）；接手的那一局不知道是哪个公会，不记
-                gbook.record(guild, res.get("score_if_cleared"), res.get("seconds", 0) / 60.0, "cleared" if res.get("cleared") else "final", tier.n)
+                gbook.record(guild, score, res.get("seconds", 0) / 60.0, "cleared" if res.get("cleared") else "final", tier.n)
                 gbook.save()
             log.say("")
             route = " → ".join(MOVE_NAMES[m] for m in res["moves"]) or "（一格都没走）"
@@ -524,7 +525,7 @@ def main() -> int:
                     log.say("  还差：" + "、".join(f"{k} {n} 个" for k, n in left.items()) + "。")
                 elif settle_spend:                   # 黎明界迷宫 + 使用门票：成功打完一局
                     log.say(f"  ✓ 第 {lap} 局打完了：最终首领打掉、已经结算，用了 1 张门票"
-                            + (f"（估分 {res['score_if_cleared']:,}" + (f"，分数线 {settle:,}" if settle else "") + "）" if res.get("score_if_cleared") else "") + "。")
+                            + (f"（实得 {score:,} 分）" if score is not None else "（实得分未读出）") + "。")
                     if lap >= laps:
                         ending = f"{laps} 局都打完了" if laps > 1 else "打完了，已经结算"
             elif res.get("hold"):                    # 没勾「使用门票」（或者门票要留着）：停在最终首领跟前，任务结束

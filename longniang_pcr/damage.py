@@ -70,6 +70,10 @@ class DamageBook:
         fight = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "team": list(team), "roles": list(roles), "damage": list(damage), **info}
         full = len(known) == len(team) and len(team) >= 2 and total > 0
         if full:
+            learn = info.get("cause") != "protection"
+            if info.get("battle") == "boss":
+                result = info.get("result")
+                learn = learn and (result == "win" or (result == "lose" and bool(info.get("cause"))))
             out["full"] = True
             shares = {n: d / total for n, _r, d in known}
             out["shares"] = shares
@@ -84,7 +88,7 @@ class DamageBook:
                 c["last"] = fight["when"][:10]
             # 输出角色之间互相比（至少两个输出角色才比得出来）
             dealers = [(n, d) for n, r, d in known if r in DAMAGE_ROLES]
-            if len(dealers) >= 2 and sum(d for _n, d in dealers) > 0:
+            if learn and len(dealers) >= 2 and sum(d for _n, d in dealers) > 0:
                 dsum = float(sum(d for _n, d in dealers))
                 wsum = sum(self.rate(n) for n, _d in dealers)
                 ratio = {n: _clip(max(FLOOR, d / dsum) / max(FLOOR, self.rate(n) / wsum), *RATIO) ** STEP for n, d in dealers}
@@ -97,7 +101,7 @@ class DamageBook:
                     self.chars[n]["rate"] = new
                     out["rate"][n] = (round(old, 3), new)
             # 估算校正：估算以为的占比 对 真机的占比
-            if sim_share and all(n in sim_share for n, _r, _d in known) and sum(sim_share.values()) > 0:
+            if learn and sim_share and all(n in sim_share for n, _r, _d in known) and sum(sim_share.values()) > 0:
                 ssum = float(sum(sim_share[n] for n, _r, _d in known))
                 ratio = {n: _clip(max(FLOOR, shares[n]) / max(FLOOR, sim_share[n] / ssum), *RATIO) ** STEP for n, _r, _d in known}
                 scale = sum((sim_share[n] / ssum) * ratio[n] for n, _r, _d in known) or 1.0     # 调完以后，估算里全队的总伤害不变

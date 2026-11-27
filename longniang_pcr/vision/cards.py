@@ -190,11 +190,13 @@ def list_cards(book: PageBook, img: np.ndarray) -> list[Card]:
 DEFEAT_HP = (305, 117, 95, 264, 269)     # 首领战失败页面“第 N 战 失败”那一栏：第一个人血条的左边、每个人的间隔、血条宽、血条的上下沿
 
 
-def defeat_hp(img: np.ndarray) -> list[float]:
+def defeat_hp(img: np.ndarray, team: int = 1) -> list[float]:
     """首领战的失败页面上，上场的五个位置各还剩多少血（0～1，绿色那一段有多长）。空位和倒下的人都是 0。
     只有首领战的失败页面有这一栏（普通战的失败页面是一张提示图），是不是那种页面由调用的人先判断。"""
     norm = to_norm(img)
     x0, dx, w, y0, y1 = DEFEAT_HP
+    y0 += 162 * (team - 1)
+    y1 += 162 * (team - 1)
     out = []
     for i in range(SLOTS):
         p = norm[y0:y1, x0 + dx * i:x0 + dx * i + w].astype(np.int16)
@@ -202,6 +204,19 @@ def defeat_hp(img: np.ndarray) -> list[float]:
         green = (g > 150) & (r < 190) & (b < 140) & (g - r > 30)
         out.append(round(float((green.sum(axis=0) >= 3).mean()), 2))
     return out
+
+
+def boss_protection_loss(book: PageBook, norm: np.ndarray, team: int, hp: list[float]) -> bool:
+    """有队员倒下且活着的人里看不到输出，优先补保护；职能图标直接读各自血条上方。"""
+    if not any(v > 0.02 for v in hp) or all(v > 0.02 for v in hp):
+        return False
+    for i, value in enumerate(hp):
+        if value > 0.02:
+            role, _ = _classify(book, norm, 358 + 117 * i, 233 + 162 * (team - 1),
+                                "ico_role_", ROLES, scale=0.86)
+            if role in ("attack", "break"):
+                return False
+    return True
 
 
 BATTLE_HP = (261, 160, 120, 666, 674)       # 战斗画面底下那排头像的血条：最左边那格的 x、每格间隔、血条宽、上下两行（1280×720）
@@ -330,20 +345,36 @@ def mark_attrs(book: PageBook, img: np.ndarray) -> list[str | None]:
     out = []
     for i in range(3):
         best: tuple[str | None, float] = (None, 0.0)
-        for sc in (s - 0.05, s, s + 0.05):                   # 这个徽标的大小量得没那么准，前后各试一档
-            a, v = _classify(book, norm, x0 + dx * i, y0, "ico_attr_", ATTRS, scale=sc, pad=5)
-            if a is not None and v > best[1]:
-                best = (a, v)
+        # 入场时三张卡依次往上滑，各自离最终位置的距离不同。
+        for dy in (0, 12, 24, 36, 48):
+            for sc in (s - 0.05, s, s + 0.05):
+                a, v = _classify(book, norm, x0 + dx * i, y0 + dy, "ico_attr_", ATTRS, scale=sc, pad=5)
+                if a is not None and v > best[1]:
+                    best = (a, v)
+            if best[0] is not None:
+                break
         out.append(best[0])
     return out
 
 
-def _stars(norm: np.ndarray, i: int) -> int:
+def _stars(norm: np.ndarray, i: int, dy: int = 0) -> int:
     x, y, w, h = RELIC_STARS
-    p = norm[y:y + h, x + RELIC_BADGE[2] * i:x + RELIC_BADGE[2] * i + w].astype(np.int16)
-    yellow = ((p[..., 2] > 215) & (p[..., 1] > 170) & (p[..., 0] < 130)).astype(np.uint8)
-    n, _, st, _ = cv2.connectedComponentsWithStats(yellow, connectivity=8)
-    return int(sum(1 for k in range(1, n) if st[k][4] >= 60))     # 一颗星大约 150～200 个黄像素
+    p = norm[y + dy:y + dy + h, x + RELIC_BADGE[2] * i:x + RELIC_BADGE[2] * i + w].astype(np.int16)
+    yellow = (p[..., 2] > 215) & (p[..., 1] > 170) & (p[..., 0] < 130)
+    if dy:
+        # 滑入中的卡片半透明，星星会变暗，但仍保留金黄色差。
+        b, g, r = p.transpose(2, 0, 1)
+        yellow |= (r > 175) & (g > 145) & (r - b > 65) & (g - b > 35)
+    yellow = yellow.astype(np.uint8)
+    _, _, stats, centers = cv2.connectedComponentsWithStats(yellow, connectivity=8)
+    # 只数从左向右连续的星位，排除卡片金边和装备图案。
+    count = 0
+    for cx in range(18, w, 21):
+        if not any(area >= 60 and abs(xc - cx) <= 5 and abs(yc - 16) <= 7
+                   for (*_, area), (xc, yc) in zip(stats[1:], centers[1:])):
+            break
+        count += 1
+    return count
 
 
 def relic_options(book: PageBook, img: np.ndarray) -> list[tuple[str | None, int]]:
@@ -352,8 +383,12 @@ def relic_options(book: PageBook, img: np.ndarray) -> list[tuple[str | None, int
     x0, y0, dx = RELIC_BADGE
     out = []
     for i in range(3):
-        ser, _ = _classify(book, norm, x0 + dx * i, y0, "ico_series_", SERIES, pad=5, size=44)
-        out.append((ser, _stars(norm, i)))
+        best, score, offset = None, 0.0, 0
+        for dy in range(0, 55, 6):
+            ser, confidence = _classify(book, norm, x0 + dx * i, y0 + dy, "ico_series_", SERIES, pad=5, size=44)
+            if ser and confidence > score:
+                best, score, offset = ser, confidence, dy
+        out.append((best, _stars(norm, i, offset)))
     return out
 
 

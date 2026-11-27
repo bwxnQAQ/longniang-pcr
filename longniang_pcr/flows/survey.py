@@ -26,6 +26,10 @@ HOME_X = 290                # 平时人物所在那一列的横坐标
 MAX_DRAGS = 7
 
 
+class SurveyMismatch(Halt):
+    """地图扫描失败，可以从人物所在位置重扫。"""
+
+
 class Tracker:
     """边拖边量地图挪了多少（向左为正）。"""
 
@@ -165,7 +169,7 @@ class Survey:
         top = [mv for h, mv in good if h == best]
         r.log.event("survey_realign", moved=round(moved), want=round(want), fits=[[h, round(mv)] for h, mv in good])
         if len(top) != 1:
-            raise Halt("拖动地图时没跟住，停稳以后拿看到的格子和记下的地图也对不出挪了多少"
+            raise SurveyMismatch("拖动地图时没跟住，停稳以后拿看到的格子和记下的地图也对不出挪了多少"
                        + ("（没有一种挪法对得上）" if not top else "（有两种挪法都对得上）") + "，不敢按这次看到的排路线")
         if abs(top[0] - moved) > 1.0:
             r.log.say(f"      拖动中没跟住，量到的是 {moved:.0f} 像素；和记下的地图一对，实际挪了 {top[0]:.0f} 像素。")
@@ -203,7 +207,7 @@ class Survey:
                 moved += TL.phase_step(tr.phase, end)
             try:
                 moved = self._realign(now.img, moved, dist)
-            except Halt:
+            except SurveyMismatch:
                 if bad:
                     raise
                 # 只丢了一两次（以前这种情况是直接信量到的数）：对不出来就还是信它
@@ -217,8 +221,50 @@ class Survey:
         rc = TL.reachable(TL.find_tiles(r.book, seen.img))
         if not rc:
             return None
-        self.x0 = rc[0].x - TL.COL_DX
-        self.starts = sorted(t.ly for t in rc)
+        home = rc[0].x
+        rows = sorted(t.ly for t in rc)
+        for attempt in range(1, 4):
+            try:
+                if attempt > 1:
+                    seen = self._recover_home(home, rows)
+                    if seen is None:
+                        return None
+                    rc = TL.reachable(TL.find_tiles(r.book, seen.img))
+                    self.map = AreaMap(area=self.map.area)
+                    self.offset = 0.0
+                    self.views = 0
+                self.x0 = rc[0].x - TL.COL_DX
+                self.starts = rows
+                return self._scan(seen)
+            except SurveyMismatch as exc:
+                r.log.event("survey_failed", area=self.map.area, attempt=attempt, why=str(exc))
+                if attempt == 3:
+                    raise Halt(f"连续 3 次看图失败：{exc}") from exc
+                r.log.say(f"      第 {attempt} 次看图失败：{exc}。重新定位人物，从头看图。")
+
+    def _recover_home(self, home: float, rows: list[int]) -> Seen | None:
+        r = self.r
+        for step in range(MAX_DRAGS + 1):
+            seen = r.look()
+            if seen.page != "map":
+                return None
+            rc = TL.reachable(TL.find_tiles(r.book, seen.img))
+            if rc and sorted(t.ly for t in rc) == rows and abs(rc[0].x - home) <= 45:
+                return seen
+            if step == MAX_DRAGS:
+                break
+            delta = float(np.clip(home - rc[0].x, -500, 500)) if rc else 500.0
+            if abs(delta) >= 10:
+                result = r.swipe(seen, (640, 400), (640 + delta, 400), "找回本次看图起点", hold_end=0.3)
+                if result == "changed":
+                    return None
+                if result == "manual":
+                    raise Halt("手动拖动，结束本次地图定位")
+            r.stop.sleep(0.4)
+        raise SurveyMismatch("找不到扫描前可走的那一列")
+
+    def _scan(self, seen: Seen) -> AreaMap | None:
+        r = self.r
         r.log.say(f"      先看全图：把这个区域从头拖到尾，记下格子和连线，再拖回来。")
         x_r, _ = self._absorb(seen.img)
         cur = seen
@@ -236,7 +282,7 @@ class Survey:
                 break
             x_r, _ = self._absorb(cur.img)
         if not self.map.complete:
-            raise Halt(f"拖了 {drags} 次还没看到这个区域的尽头")
+            raise SurveyMismatch(f"拖了 {drags} 次还没看到这个区域的尽头")
         back = 0
         while abs(self.offset) > 45.0 and back < MAX_DRAGS:
             want = -float(np.clip(self.offset, -880.0, 880.0))
@@ -247,15 +293,15 @@ class Survey:
             cur, moved = got
             self.offset += moved
             if abs(moved) < 25.0 and abs(self.offset) > 45.0:
-                raise Halt(f"地图拖不回原位（还差 {self.offset:.0f} 像素）")
+                raise SurveyMismatch(f"地图拖不回原位（还差 {self.offset:.0f} 像素）")
         if abs(self.offset) > 45.0:
-            raise Halt(f"地图没拖回原位（还差 {self.offset:.0f} 像素）")
+            raise SurveyMismatch(f"地图没拖回原位（还差 {self.offset:.0f} 像素）")
         missing = [c for c in range(1, self.map.last) if c not in self.map.edges]
         r.log.event("survey_done", area=self.map.area, last=self.map.last, views=self.views, drags=drags + back,
                     missing=missing, starts=self.starts,
                     rows={str(c): {str(ly): lab for ly, lab in rr.items()} for c, rr in self.map.rows.items()},
                     edges={str(c): {f"{la}>{lb}": s for (la, lb), s in e.items()} for c, e in self.map.edges.items()})
         if missing:
-            raise Halt(f"第 {missing} 列和下一列之间的连线没看到，地图不完整")
+            raise SurveyMismatch(f"第 {missing} 列和下一列之间的连线没看到，地图不完整")
         self.final = cur
         return self.map

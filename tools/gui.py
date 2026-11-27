@@ -148,7 +148,7 @@ _STAMP = re.compile(r"^\s*\[\d\d:\d\d:\d\d\]\s*")
 # 从功能脚本打印的字里认几样东西，显示成状态行下面那排小标签
 _FACTS = (("updated", re.compile(r"^更新好了：.*→\s*V?([\d.]+)")), ("reset", re.compile(r"^(重置好了)")), ("tier", re.compile(r"^档位：(.+?)——")), ("laps", re.compile(r"这次连续打 (\d+) 局")), ("lap", re.compile(r"^—— 第 (\d+) 局")),
           ("restarts", re.compile(r"^—— 重开第 (\d+) 次")), ("area", re.compile(r"区域 (\d) 一共 \d+ 列")),
-          ("score", re.compile(r"最终分数是 ([\d,]+)")))
+          ("score", re.compile(r"(最终分数是 [\d,]+|续打估分下限是 [\d,]+|结算实得 [\d,]+ 分|结算分未能核实)")))
 
 
 def settings_walk(root: Path) -> dict[str, Any]:
@@ -285,6 +285,8 @@ class Launcher:
                     m = rx.search(t)
                     if m:
                         self.facts[name] = m.group(1)
+                        if name in ("lap", "restarts"):
+                            self.facts.pop("score", None)
                 if "…打赢了" in t:
                     self.facts["wins"] = int(self.facts.get("wins", 0)) + 1
                 elif "…打输了" in t:
@@ -1015,7 +1017,7 @@ function drawChips(f){
   if (f.restarts) c.push('<span class="chip">重开 <b>' + f.restarts + '</b> 次</span>');
   if (f.recovers) c.push('<span class="chip">走回迷宫 <b>' + f.recovers + '</b> 次</span>');
   if (f.hand) c.push('<span class="chip gold"><b>有个画面认不出来：请到模拟器里手动点过去</b></span>');
-  if (f.score) c.push('<span class="chip gold">打掉最终首领能得 <b>' + esc(f.score) + '</b> 分</span>');
+  if (f.score) c.push('<span class="chip gold">' + esc(f.score) + '</span>');
   $('chips').innerHTML = c.join(''); $('chips').className = c.length ? 'on' : '';
 }
 function tbl(head, rows){

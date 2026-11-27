@@ -936,9 +936,12 @@ class Walk:
             self._read_hud(s.img)
             if self.ev_before is not None:
                 self._after_event()
-        if (self.scout and self.scout_step < 2 and rc and area == 1 and not self.moves and not self.want_retreat
-                and self.team_mode == "role" and self._scout_bosses(s)):
-            return
+        if self.scout and self.scout_step < 2 and rc and area and not self.want_retreat and self.team_mode == "role":
+            if self.took_over or (area == 1 and not self.moves):
+                if area > 3 and self.scout_step == 0:
+                    self.scout_step = 1  # 区域 3 已经过了，只补最终首领
+                if self._scout_bosses(s):
+                    return
         if rc and any(t.label == "boss" for t in rc) and not self.want_retreat and not self._boss_ok():
             if self.area == 5 and self.final_stop:           # 最终首领跟前：没勾门票就停下；勾了看分数——够了打，不够撤退重打
                 self.at_final = True
@@ -988,7 +991,7 @@ class Walk:
         self._tap_wait(s, t.tap_box, f"第 {len(self.moves) + 1} 格：{t.row_name}边那格（{LABEL_NAMES[t.label]}）", think=True, timeout=6.0)
 
     def _scout_bosses(self, s: Seen) -> bool:
-        """刚到区域 1 的地图：点进度条上的 BOSS 图标看这一局的首领。返回 True = 这一步点了图标（回主循环等「魔物详情」）。"""
+        """从地图点进度条查看首领；返回 True 时，回主循环重新观察页面。"""
         r = self.r
         key, box = f"map_boss{self.scout_step + 1}", BOX[f"map.boss{self.scout_step + 1}"]
         which = "区域 3 首领" if self.scout_step == 0 else "最终首领"
@@ -996,6 +999,11 @@ class Walk:
             self.scout_miss += 1
             self.scout_wait = False
         if key not in r.book.marks or not r.book.has_mark(s.img, key) or self.scout_miss >= 2:
+            if self.took_over and self.scout_step == 0:
+                r.log.say("      续打时没能查看区域 3 首领，继续看最终首领。")
+                r.log.event("scout_skip", step=0, miss=self.scout_miss)
+                self.scout_step, self.scout_miss = 1, 0
+                return True
             r.log.say(f"      进度条上没找到{which}的图标（或者点了两次都没打开）：这一局不看首领了，照常走。")
             r.log.event("scout_skip", step=self.scout_step, miss=self.scout_miss)
             self.scout_step = 2
@@ -1028,7 +1036,7 @@ class Walk:
         """两个首领看完了：要重开的重开；不重开就记下它们要什么，招募时对应着拿。"""
         r = self.r
         why = TR.boss_verdict(self.bosses, self.reroll["boss_want"] if self.tier.reroll else [], self.boss_avoid)
-        if why:
+        if why and not (self.took_over and self.area > 1):  # 中途补情报用于后续编队，不用开局筛选条件重开
             self.want_retreat, self.restart = True, True
             self.why_retreat = why
             r.log.say(f"      {self.why_retreat}：撤退重开。")

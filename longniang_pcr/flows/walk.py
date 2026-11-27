@@ -41,6 +41,7 @@ from .. import advisor as AD
 from .. import chars as CH
 from .. import damage as DM
 from .. import ocr
+from .. import recruit as RC
 from .. import strategy as ST
 from ..runner import Halt, NBox, Runner, Seen
 from ..score import score_if_cleared
@@ -374,6 +375,8 @@ class Walk:
         self.chars: CH.CharBook = chars if chars is not None else CH.CharBook()      # 头像库：头像 → 名字（没给就只在这一趟里记）
         self.join_seen: list | None = None           # 这一次「角色加入」已经读过了（存的是读到的名字）
         self.join_tries = 0
+        self.recruit_team = []
+        self.recruit_win = False
         self.last_team: list[str] = []               # 这一场上场的人（认得出名字的写名字，认不出的写 职能/属性）
         self.last_had: list[str] = []                # 这一场上的队带着哪种保命的人（"tank" = 有坦克或肉的前排顶在最前面，"heal" = 有会给全队回血的人）
         self.run_wins: dict[str, int] = {}           # 这一局里谁赢过几场（赢过的人编队时优先沿用）
@@ -1081,6 +1084,8 @@ class Walk:
             self.lost_how = None
             self.tries, self.hp_log = [], []
             self.targets = None
+            self.recruit_team = []
+            self.recruit_win = False
             self.battle_kind = kind if kind in ("normal", "extreme", "boss") else "extreme"   # 事件里的战斗按极难对待
             self.arriving, self.arrive_wait = True, 0
             self.col += 1
@@ -1682,6 +1687,8 @@ class Walk:
                 return (f"{u.name}[{base}]" if u.name else base) + (f"（{mark}）" if mark else "")
 
             who = "、".join(show(u) for u in plan.team)
+            self.recruit_team = [(u.name, u.role, u.attr) for u in plan.team]
+            self.recruit_win = False
             self.last_team = [u.name or f"{CD.ROLE_CN[u.role]}/{CD.ATTR_CN[u.attr]}" for u in plan.team]
             self.last_roles = {u.name: u.kind for u in plan.team if u.name}
             sub0 = ST.stand_in_tank(plan.team) if "tank" in ((tweak2 or {}).get("need") or []) and not any(u.role == "tank" for u in units) else None
@@ -2166,6 +2173,7 @@ class Walk:
     def _remember(self, win: bool) -> None:
         """这一场打完：先记进这一趟的战斗清单（小结里列“输了哪几场、哪几场最慢”用）；再把上场的队和结果按敌人记进账本
         （账本只记极难和单队打的首领战，五个人都认得出名字的）。"""
+        self.recruit_win = win and not (self.battle_kind == "boss" and self._boss_teams() > 1)
         self.fights.append({"area": self.area, "kind": self.battle_kind, "enemy": self.enemy, "win": bool(win), "game": self.last_game,
                             "real": self.last_secs, "attempt": self.attempt, "how": None if win else self.lost_how})
         if self.wins is None or not self.enemy or self.battle_kind not in ("extreme", "boss"):
@@ -2538,10 +2546,20 @@ class Walk:
                                           atks=sides, side=self.recruit_side, wants=wants,
                                           powers=[1.0 if self.chars.is_pvp(n) else self.chars.power(n) for n in names],     # 纯竞技场用的角色：招募时按最低强度算
                                           heals=[self.chars.heal(n) for n in names], unlisted=unlisted)
+            original_pick, trial = pick, {}
+            if self.recruit_win and len(btns) == 3:
+                pick, trial = RC.trial_recruit(self.chars, owned, self.recruit_team, list(zip(names, roles, attrs)),
+                                              pick, self.dmg.rates() if self.dmg else {},
+                                              self.boss_dmg.rates() if self.boss_dmg else {})
+                if pick != original_pick:
+                    road = trial["road"]["rows"][pick]["gain"]
+                    boss = trial["boss"]["rows"][pick]["gain"]
+                    why = f"整队试排从{names[original_pick]}改选{names[pick]}（道中 +{road:g}，单体首领 +{boss:g}）"
             if any(unlisted):
                 why += "；名单外已降权：" + "、".join(name for name, outside in zip(names, unlisted) if outside)
             label = f"选择第 {pick + 1} 个（{show[pick]}，{why}；三个是 {'、'.join(show)}）"
             r.log.event("recruit", cards=[[c.role, c.attr] for c in cards], resolved=list(zip(roles, attrs)), names=names, pick=pick, roster=dict(self.roster),
+                        original_pick=original_pick, team_trial=trial,
                         atks=[self.chars.atk(n) for n in names], side=self.recruit_side, power=[self.chars.power(n) for n in names], wants=wants)
             after = ("role", roles[pick], names[pick], attrs[pick])
         else:
@@ -2566,6 +2584,8 @@ class Walk:
         self.choice_wait = 0
         pick = min(pick, len(btns) - 1)
         if self._tap_wait(s, choose_button(btns[pick][1]), label, think=True) != "changed" and after is not None:
+            if after[0] == "role":
+                self.recruit_win = False
             if after[0] == "role" and after[1]:
                 self.roster[after[1]] = self.roster.get(after[1], 0) + 1
                 if after[2]:

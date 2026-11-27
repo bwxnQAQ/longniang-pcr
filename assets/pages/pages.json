@@ -473,6 +473,52 @@
    ]
   },
   {
+   "id": "defeat_next",
+   "name": "战斗失败（下一步）",
+   "dark": false,
+   "black": false,
+   "wait": false,
+   "anchors": [
+    [
+     {
+      "key": "defeat_title",
+      "rect": [
+       486,
+       38,
+       310,
+       60
+      ],
+      "thr": 0.8,
+      "search": 14
+     },
+     {
+      "key": "defeat_title_boss",
+      "rect": [
+       466,
+       44,
+       352,
+       74
+      ],
+      "thr": 0.8,
+      "search": 14
+     }
+    ],
+    [
+     {
+      "key": "next_text",
+      "rect": [
+       1038,
+       643,
+       86,
+       32
+      ],
+      "thr": 0.8,
+      "search": 44
+     }
+    ]
+   ]
+  },
+  {
    "id": "battle_ready",
    "name": "战斗准备",
    "dark": false,

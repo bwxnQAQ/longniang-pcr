@@ -81,6 +81,7 @@ BOX.update({
     "map.boss1": (657, 30, 32, 30), "map.boss2": (811, 30, 32, 30), "monster.close": (586, 624, 100, 30), "end3.retreat": (585, 480, 110, 32),
     "defeat.retry": (960, 636, 230, 40), "defeat.end": (655, 636, 230, 40), "ready.map": (690, 588, 210, 38),
     "win.next": (1010, 636, 200, 38),             # WIN! 的「下一步」
+    "defeat.next": (965, 636, 225, 40),           # 「战斗失败」上只有一个「下一步」的那种（败北被遗物免除了）：按钮在「重新挑战」的位置
     "scene.skip": (1140, 36, 60, 36),             # 演出画面右上角的跳过
     "shop.close": (985, 616, 180, 38),            # 商店的「关闭」
     "shop.refresh": (375, 636, 150, 26),          # 商店的「用×××更新」
@@ -363,6 +364,7 @@ class Walk:
             self.defeat_retries = max(self.defeat_retries, self.tier.retries)
         self.tb: dict[str, Any] | None = None        # 这一场的编队进度（看了哪些页签、打算带谁、还要点谁）
         self.attempt = 0                             # 这一场是第几次打（0 = 第一次）
+        self.waived = 0                              # 这一趟有几场败北被遗物免除了（「战斗失败」页面上只有「下一步」的那种）
         self.losses = 0                              # 这一趟一共输了几场
         self.boss_extra = 0                          # 首领战输过以后多编几队
         self.weak: str | None = None                 # 这一场敌人的弱点属性
@@ -868,11 +870,12 @@ class Walk:
                         self.run_wins[n] = self.run_wins.get(n, 0) + 1
                 self.battle_logged = True
                 return
-            if s.page == "defeat":
+            if s.page in ("defeat", "defeat_next"):
+                waived = s.page == "defeat_next"     # 「战斗失败」上只有「下一步」：这次败北被遗物免除了（破晓之星的公会遗物）
                 self.last_secs, self.last_game = round(now - t0, 1), game
-                r.log.say(f"      …打输了，用时{took}")
+                r.log.say(f"      …打输了{'（页面上只有「下一步」：这次败北被遗物免除了）' if waived else ''}，用时{took}")
                 r.log.event("battle_end", n=self.battles + 1, seconds=round(now - t0, 1), game=game, result="lose", battle=self.battle_kind,
-                            attempt=self.attempt, team=list(self.last_team), enemy=self.enemy, est=self.last_est)
+                            attempt=self.attempt, team=list(self.last_team), enemy=self.enemy, est=self.last_est, **({"waived": True} if waived else {}))
                 self.chars.record_battle([n for n in self.last_team if "/" not in n], self.battle_kind, round(now - t0, 1), False)
                 self.chars.save()
                 self._remember(False)
@@ -2478,14 +2481,17 @@ class Walk:
             tw["need"] = list(tw.get("need") or []) + ["tank"]
         return tw
 
-    def _on_defeat(self, s: Seen) -> None:
-        """战斗失败：先换一套打法「重新挑战」；超过次数就「结束」，回地图撤退（不带奖励，通行证退回），外面再重开。"""
+    def _on_defeat(self, s: Seen, waived: bool = False) -> None:
+        """战斗失败：先换一套打法「重新挑战」；超过次数就「结束」，回地图撤退（不带奖励，通行证退回），外面再重开。
+        waived = 页面上只有一个「下一步」（没有「结束」「重新挑战」）：这次败北被遗物免除了——公会破晓之星的遗物效果是“免除一次战斗败北”
+        （2026-11-28 用户给的截图；以前这一页不认识，工具停在那里）。照样记成输了一场，然后点「下一步」；
+        之后游戏去哪（地图 / 别的页面）都照平时的处理——要是还得再打这一场，下一次会按“输过一次”换队。"""
         r = self.r
         if self.fighting:                            # 这一场刚输：只记一次
             self.fighting = False
             if not self.battle_logged:
                 r.log.event("battle_end", n=self.battles + 1, seconds=None, result="lose", battle=self.battle_kind, attempt=self.attempt,
-                            team=list(self.last_team), enemy=self.enemy, est=self.last_est)
+                            team=list(self.last_team), enemy=self.enemy, est=self.last_est, **({"waived": True} if waived else {}))
                 self.chars.record_battle([n for n in self.last_team if "/" not in n], self.battle_kind, None, False)
                 self.chars.save()
                 self.last_secs = self.last_game = None
@@ -2493,7 +2499,7 @@ class Walk:
             self.battle_logged = False
             self.losses += 1
             self.attempt += 1
-            r.log.shot(s.img, "defeat", png=True)
+            r.log.shot(s.img, "defeat_next" if waived else "defeat", png=True)
             page_how, hp = self._loss_cause(s)
             log = list(self.hp_log)
             if page_how is None and log:             # 普通战 / 极难的失败页面上没有血条：看战斗中最后一次读到的
@@ -2518,8 +2524,16 @@ class Walk:
                 # 首领战输了：下一次多编一队。区域 3 首领以前第一、二档只用一队打（凹分要一队过）——2026-11-27 用户定的：
                 # “三层 boss 一队过不了就重开……不再作为默认选项”，勾了（boss3_single）才只用一队
                 self.boss_extra += 1
-                if self.area != 5:
+                if self.area != 5 and not waived:
                     r.log.say(f"      区域 3 首领一队没打过：下一次编 {self._boss_teams()} 队（要只用一队、打不过就重开：勾「更多选项」里的「第三层首领一队过不了就重开」）。")
+            if waived:
+                self.waived += 1
+                self.defeat_report = False
+                r.log.say("      「战斗失败」页面上只有「下一步」：这次败北被遗物免除了（公会破晓之星的遗物能免除一次战斗败北）。点「下一步」接着走。")
+                r.log.event("defeat_waived", battle=self.battle_kind, enemy=self.enemy, attempt=self.attempt, n=self.waived)
+        if waived:
+            self._tap_wait(s, BOX["defeat.next"], "下一步（这次败北被遗物免除了）")
+            return
         if self.defeat_report:
             self.defeat_report = False
             if self._damage_report(s, "defeat"):
@@ -3110,6 +3124,8 @@ class Walk:
                 self._tap_wait(s, BOX["ready.fight"], "挑战")
             elif page == "defeat" and self.seen_pick3:
                 self._on_defeat(s)
+            elif page == "defeat_next" and self.seen_pick3:
+                self._on_defeat(s, waived=True)
             elif page == "dlg_team" and self.seen_pick3:
                 if not self._fix_sort(s):            # 排序不是「等级」的话先换回来（认卡片靠的是卡片上的“等级”两个字）
                     self._on_team(s)

@@ -12,7 +12,7 @@ from typing import Any
 from ..runner import Halt, Runner, Seen
 from .walk import BOX
 
-IN_RUN = ("map", "battle", "battle_ready", "dlg_team", "dlg_pick3", "dlg_move", "win", "win_next", "defeat", "event", "dlg_shop",
+IN_RUN = ("map", "battle", "battle_ready", "dlg_team", "dlg_pick3", "dlg_move", "win", "win_next", "defeat", "defeat_next", "event", "dlg_shop",
           "recruit_pick", "relic_pick", "result", "dlg_chest_result")
 
 

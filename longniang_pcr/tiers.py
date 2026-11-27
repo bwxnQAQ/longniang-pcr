@@ -26,16 +26,16 @@ class Tier:
     max_restarts: int | None = None    # 最多重开几次（None = 用设置里的 walk.max_restarts）
     retries: int | None = None         # 一场打输以后最多换队再打几次（None = 用设置里的 walk.defeat_retries）
     boss_mid_teams: int | None = None  # 区域 3 首领第一次编几队（None = 用设置里的 walk.boss_teams_mid）
-    boss_more: bool = False            # 区域 3 首领打输以后，下一次能不能多编一队
+    boss_more: bool = False            # （2026-11-27 起不看这一项了：哪一档打输了都多编一队，除非勾了“一队过不了就重开”，见 REROLL_DEFAULTS 的 boss3_single）
     guards: tuple[str, ...] = ()       # 极难 / 首领第一次就带上的保命职能
     caution: int = 0                   # 战斗估算往坏处多想几档（按“已经输过几次”那样放大敌人的伤害）
     reroll: bool = False               # 开局凹：首领不合意、事件给得少就重开
 
 
 TIERS: dict[int, Tier] = {
-    1: Tier(1, "第一档·最高凹分", "极难全打；极难走不到、首领不合意、前两个区域的事件给得少、第二层绕不开商店都撤退重开；区域 3 首领一队过",
+    1: Tier(1, "第一档·最高凹分", "极难全打；极难走不到、首领不合意、前两个区域的事件给得少、第二层绕不开商店都撤退重开；区域 3 首领先一队、输了多编一队（“第四层没双极难就重开”“第三层首领一队过不了就重开”在「更多选项」里勾了才算）",
             max_restarts=20, reroll=True),
-    2: Tier(2, "第二档·极难全打", "极难全打，只有极难走不到才重开；区域 3 首领一队过（以前一直用的就是这一档）"),
+    2: Tier(2, "第二档·极难全打", "极难全打，只有极难走不到才重开；区域 3 首领先一队、输了多编一队（“第四层没双极难就重开”“第三层首领一队过不了就重开”在「更多选项」里勾了才算）"),
     3: Tier(3, "第三档·稳着打", "极难能走到几个打几个，走不到不重开；区域 3 首领先一队、输了多编一队；打输多给一次重打",
             extreme="most", restart_blocked=False, retries=3, boss_more=True, caution=1),
     4: Tier(4, "第四档·保通关", "能不走极难就不走；极难和首领第一次就带坦克、治疗；区域 3 首领一开始就两队",
@@ -48,7 +48,18 @@ DEFAULT = 2
 #   auto_avoid = 真机上打过两次以上、一次都没赢过的首领，自动算进“遇到就重开”（账本见 wins.py）
 #   no_shop_areas = 这几个区域不走商店（2026-11-24 用户定的：第二层如果必须走商店就重开）：有不过商店、极难又一列不落的路就走那条，
 #     没有就撤退重开。默认只有区域 2；写成 [] 就是不管商店
-REROLL_DEFAULTS: dict[str, Any] = {"boss_want": [], "boss_avoid": [], "event_min": 400, "areas": 2, "auto_avoid": True, "no_shop_areas": [2]}
+#   no_shop_always = 不管哪一档都按 no_shop_areas 来（2026-11-27 用户要的：「更多选项」里“第二层绕不开商店就重开”哪一档都能勾；界面勾了 = --shop-reroll）。
+#     别的档位里“极难一列不落”换成那一档自己对极难的要求（第三档能走到几个算几个，第四档不走极难）
+#   marks_first = 区域 1 至少要踩到几个印记格（给角色的格子；区域 1 的第 2、4 列各有一个），踩不到这么多就撤退重开。0 = 不管（默认）。
+#     2026-11-27 用户要的「第一层没双角色格就重开」= 2（界面勾了 = --marks-reroll）。哪一档都管用
+#   double_ex4 = 区域 4 的两个极难没法都走到时要不要撤退重开。2026-11-27 用户定的：这一条不再是默认的，放进「更多选项」
+#     （界面勾了 = --ex4-reroll）。False（默认）：第一、二档在区域 4 也只打走得到的，不为这个重开；True：重开（第三档勾了也重开，第四档不走极难、不管）。
+#     别的区域照旧：第一、二档极难走不到就重开
+#   boss3_single = 区域 3 首领只用一队打、打不过就撤退。2026-11-27 用户定的：这一条也不再是默认的，放进「更多选项」（界面勾了 = --boss3-single）。
+#     False（默认）：哪一档都是打输了下一次多编一队（以前只有第三、四档这样）；True：只编队伍 1，重打也不加队，打满次数还不过就撤退重开。
+#     （手上 83 场区域 3 首领的记录：一队打 34 胜 49 负，赢的也要 63～89 秒；三队打的最终首领 21 胜 0 负。）
+REROLL_DEFAULTS: dict[str, Any] = {"boss_want": [], "boss_avoid": [], "event_min": 400, "areas": 2, "auto_avoid": True, "no_shop_areas": [2],
+                                   "no_shop_always": False, "marks_first": 0, "double_ex4": False, "boss3_single": False}
 
 
 def get(n: Any) -> Tier:
@@ -66,6 +77,13 @@ def reroll_of(cfg: dict[str, Any] | None) -> dict[str, Any]:
     out["boss_want"] = [str(x) for x in (out["boss_want"] or [])]
     out["boss_avoid"] = [str(x) for x in (out["boss_avoid"] or [])]
     out["auto_avoid"] = bool(out["auto_avoid"])
+    out["no_shop_always"] = bool(out["no_shop_always"])
+    out["double_ex4"] = bool(out["double_ex4"])
+    out["boss3_single"] = bool(out["boss3_single"])
+    try:
+        out["marks_first"] = max(0, min(2, int(out["marks_first"] or 0)))
+    except (TypeError, ValueError):
+        out["marks_first"] = 0
     try:
         out["no_shop_areas"] = sorted({int(x) for x in (out["no_shop_areas"] or []) if 1 <= int(x) <= 5})
     except (TypeError, ValueError):

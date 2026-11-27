@@ -36,7 +36,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from ..plan import KIND_NAMES, AreaMap, Plan, make_plan, row_name, shop_value
+from ..plan import KIND_NAMES, AreaMap, Plan, make_plan, row_name, shop_value, tile_value
 from .. import advisor as AD
 from .. import chars as CH
 from .. import damage as DM
@@ -168,6 +168,11 @@ HIT_CN = {"aoe": "打一群", "single": "打单体", "both": "单体和一群都
 LIST_STEP = {True: 135.0, False: 236.0}  # 看名单时一次往下翻多少：首领战一屏只有一行，翻一行；平时一屏两行多，翻一行半（不会漏行）
 ROW_STEP = {True: 135.0, False: 147.0}   # 找某一张卡时，差一行就拖这么多
 LIST_DRAG = (640.0, 470.0)               # 从这里往上拖（两列卡片中间的缝里，不会按到卡片上）
+# 拖名单时手指最高到哪（1280×720 的 y）。平时 232：再往上是「用角色名搜索」的输入框可能露出来的地方。
+# 首领战的页面顶上多一条“对首领的有效效果”，名单整个低一截（从 y≈240 才开始），232 落在名单上沿外面、页签那一行底下——从那里起手游戏不认这次拖动。
+# 2026-11-27 一位玩家的截图：最终首领、暗属性页签 4 行、看完名单停在最底下，要上的人在第 1 行，“往上翻 2 行”连拖 14 次名单一动不动，那张卡就没上场
+# （另外两个排查包里也各有 3 次 team_card_lost，全是暗属性——暗是最后看的页签）。首领战一次只拖一行：335～470 之间，和看名单时用的是同一段，真机上一直是好的。
+LIST_TOP = {True: 335.0, False: 232.0}
 MAX_LIST_SCROLL = 10                     # 一个页签最多往下翻几次（一行 8 张，翻 10 次能看 100 多张）
 IME_ROI = (100, 655, 1000, 60)           # 弹出输入法时，画面最下面这一条是白的（右边有「确定」）
 IME_OK = (1205.0, 664.0, 54.0, 34.0)     # 那条白栏右边的「确定」
@@ -401,6 +406,8 @@ class Walk:
         self.teams_mid, self.teams_final = max(1, min(3, teams_mid)), max(1, min(3, teams_final))
         if self.tier.boss_mid_teams is not None:     # 第四档：区域 3 首领一开始就多编一队
             self.teams_mid = max(self.teams_mid, min(3, self.tier.boss_mid_teams))
+        if self.reroll["boss3_single"]:              # 勾了「第三层首领一队过不了就重开」：只编队伍 1，重打也不加队
+            self.teams_mid = 1
         self.cleared = False                         # 最终首领打完了，正在走结算
         self.at_final = False                        # 走到最终首领跟前了（这一趟不打，撤退）
         self.chest_taps = 0
@@ -429,6 +436,7 @@ class Walk:
         # 路线是从现在站的地方往后排的）；停在战斗准备上可以先点「查看地图」回去，别的页面（编队、战斗中、事件……）前面发生了什么不知道，不接。
         self.resume = bool(resume)
         self.took_over = False                       # 这一局是接手的（出发前的通行证数字、前面走过的格子都没看到）
+        self.marks_said = False                      # 「第一层没双角色格就重开」说不准的那句话说过没有
         self.resume_said = False
         self.own_said = False                        # “还没扫描过角色，分不出哪些是自己的”这句话说过了（一局说一次）
         self.mid_area = False                        # 接手以后还没看过图：第一次看图是从区域中途看起的
@@ -598,6 +606,47 @@ class Walk:
     def _boss_teams_base(self) -> int:
         return self.teams_final if self.area == 5 else self.teams_mid
 
+    def _extreme_mode(self) -> str:
+        """这个区域排路线时对极难的要求（plan.make_plan 的 extreme）。平时就是档位定的。
+        区域 4（有两个极难的那一层）：2026-11-27 用户定的“四层没双 ex 重开……不再作为默认选项”——
+        勾了（reroll 里的 double_ex4）= 两个都要走到，走不到就撤退重开；没勾 = 能走到几个打几个，不为这个重开。第四档不走极难，不管。"""
+        mode = self.tier.extreme
+        if self.area == 4 and mode != "avoid":
+            return "all" if self.reroll["double_ex4"] else "most"
+        return mode
+
+    def _need_marks(self, m: AreaMap, col: int, starts: list[int], plan: Plan) -> Plan | None:
+        """勾了「第一层没双角色格就重开」（reroll 里的 marks_first = 2）：区域 1 的第 2、4 列各有一个印记格（给角色的格子），
+        要踩到这么多个才往下走；踩不到 → 安排撤退重开，返回 None。踩得到 → 返回踩印记最多的那条路（别的照旧按分值挑）。
+        地图上有没认出来的格子、说不准的时候不重开。接手的一局（前面走过什么没看到）不管。"""
+        want = int(self.reroll["marks_first"])
+        if want <= 0 or self.area != 1 or not plan.ok or self.took_over:
+            return plan
+        big = 100000.0
+        vals = self._route_values()
+        mark = tile_value("mark", vals)
+        kinds = lambda pl: [m.rows.get(c, {}).get(ly) for c, ly in pl.path]      # noqa: E731
+        best = make_plan(m, col, starts, self.edge_thr, {**vals, "mark": mark + big}, self._extreme_mode())
+        done = self.moves.count("mark")
+        got = done + kinds(best).count("mark")
+        if best.ok and got >= want:
+            best.value -= big * kinds(best).count("mark")
+            return best
+        maybe = make_plan(m, col, starts, self.edge_thr, {**vals, "mark": mark + big, "unknown": tile_value(None, vals) + big}, self._extreme_mode())
+        unsure = done + sum(k in ("mark", None) for k in kinds(maybe))
+        r = self.r
+        if maybe.ok and unsure >= want:              # 有没认出来的格子，可能就是印记格：说不准，不为这个重开
+            if not self.marks_said:
+                self.marks_said = True
+                r.log.say(f"      勾了「第一层没双角色格就重开」，但这张图上有没认出来的格子，分不清踩不踩得到 {want} 个印记格：不为这个重开。")
+            maybe.value -= big * sum(k in ("mark", None) for k in kinds(maybe))
+            return maybe
+        why = f"区域 1 踩不到 {want} 个印记格（给角色的格子），最多 {got} 个（勾了「第一层没双角色格就重开」）"
+        r.log.say(f"      {why}：撤退重开。")
+        r.log.event("marks_restart", area=self.area, col=self.col, got=got, want=want, path=[[c, ly] for c, ly in best.path])
+        self.want_retreat, self.why_retreat, self.restart = True, why, True
+        return None
+
     def _choose_tile(self, rc: list[TL.Tile]) -> TL.Tile | None:
         """按路线选下一格。没有地图（没开看全图）时退回老办法：有极难走极难，否则最上面。返回 None = 该撤退了。"""
         r, m = self.r, self.area_map
@@ -623,11 +672,15 @@ class Walk:
                 r.log.event("edge_mismatch", area=self.area, col=self.col, ly=self.cur_ly, guess=guess, glow=glow)
         for ly, t in by_row.items():                 # 走到跟前看得更清楚：补上这一列的格子类型
             m.set_tile(self.col + 1, ly, t.kind, True)
-        plan = make_plan(m, self.col + 1, glow, self.edge_thr, self._route_values(), self.tier.extreme)
+        plan = make_plan(m, self.col + 1, glow, self.edge_thr, self._route_values(), self._extreme_mode())
         self.plan = plan
         if not plan.ok:
             self._give_up(plan)
             return None
+        alt = self._need_marks(m, self.col + 1, glow, plan)
+        if alt is None:
+            return None
+        self.plan = plan = alt
         alt = self._avoid_shop(m, self.col + 1, glow, plan)
         if alt is None:
             return None
@@ -636,22 +689,24 @@ class Walk:
         return by_row[want] if want in by_row else min(rc, key=lambda t: abs(t.ly - want))
 
     def _avoid_shop(self, m: AreaMap, col: int, starts: list[int], plan: Plan) -> Plan | None:
-        """第一档：这个区域不走商店（默认只有区域 2——用户定的“第二层如果必须走商店就重开”）。
-        选好的路不过商店：原样用。过商店：有不过商店、极难又一列不落的路就改走那条；没有（必须走商店）→ 安排撤退重开，返回 None。"""
-        if not (self.tier.reroll and self.area in self.reroll["no_shop_areas"]) or not plan.ok:
+        """这个区域不走商店（默认只有区域 2——用户定的“第二层如果必须走商店就重开”）。第一档本来就带；
+        别的档位勾了「第二层绕不开商店就重开」（reroll 里的 no_shop_always，2026-11-27）也带。
+        选好的路不过商店：原样用。过商店：有不过商店、这一档该打的极难又不耽误的路就改走那条；没有（必须走商店）→ 安排撤退重开，返回 None。"""
+        if not ((self.tier.reroll or self.reroll["no_shop_always"]) and self.area in self.reroll["no_shop_areas"]) or not plan.ok:
             return plan
+        who = self.tier.name if self.tier.reroll else "勾了「第二层绕不开商店就重开」"
         if not any(m.rows.get(c, {}).get(ly) == "shop" for c, ly in plan.path):
             return plan
         r = self.r
-        alt = make_plan(m, col, starts, self.edge_thr, self._route_values(), self.tier.extreme, ban=("shop",))
+        alt = make_plan(m, col, starts, self.edge_thr, self._route_values(), self._extreme_mode(), ban=("shop",))
         if alt.ok:
             if alt.path != self.shop_free_path[-len(alt.path):]:
                 self.shop_free_path = list(alt.path)
-                r.log.say(f"      原本的路要过商店；{self.tier.name}在区域 {self.area} 不走商店，改走：{self._plan_text(alt)}。")
+                r.log.say(f"      原本的路要过商店；{who}，在区域 {self.area} 不走商店，改走：{self._plan_text(alt)}。")
                 r.log.event("shop_avoid", area=self.area, col=self.col, path=[[c, ly] for c, ly in alt.path], was=[[c, ly] for c, ly in plan.path])
             return alt
         why = (f"区域 {self.area} 绕不开商店" + ("（不过商店就打不全极难）" if alt.path else "")
-               + f"（{self.tier.name}：第二层必须走商店就重开）")
+               + f"（{who}：第二层必须走商店就重开）")
         r.log.say(f"      {why}：撤退重开。")
         r.log.event("shop_restart", area=self.area, col=self.col, path=[[c, ly] for c, ly in plan.path])
         self.want_retreat, self.why_retreat, self.restart = True, why, True
@@ -660,6 +715,8 @@ class Walk:
     def _give_up(self, plan: Plan) -> None:
         cols = "、".join(f"第 {c} 列" for c in plan.blocked) if plan.blocked else "后面"
         why = f"区域 {self.area} {cols}的极难走不到" if plan.path else f"区域 {self.area} 从这里走不到尽头（地图可能没看准）"
+        if plan.path and self.area == 4 and self.reroll["double_ex4"]:
+            why += "（勾了「第四层没双极难就重开」）"
         self.r.log.say(f"      {why}：撤退。")
         self.r.log.event("blocked", area=self.area, col=self.col, blocked=plan.blocked, extremes=plan.extremes, wanted=plan.wanted)
         self.want_retreat, self.why_retreat, self.restart = True, why, bool(plan.path)
@@ -688,11 +745,18 @@ class Walk:
             r.log.say(f"      区域 {self.area} 一共 {m.last} 列：")
         for line in m.describe(self.edge_thr):
             r.log.say("        " + line)
-        plan = make_plan(m, 1, sorted(t.ly for t in rc), self.edge_thr, self._route_values(), self.tier.extreme)
+        plan = make_plan(m, 1, sorted(t.ly for t in rc), self.edge_thr, self._route_values(), self._extreme_mode())
         self.plan = plan
         if plan.ok:
+            alt = self._need_marks(m, 1, sorted(t.ly for t in rc), plan)
+            if alt is None:                          # 勾了「第一层没双角色格就重开」、踩不到两个印记格：已经安排撤退重开
+                self.surveys.append({"area": self.area, "cols": m.last, "extreme_cols": m.extreme_cols(), "ok": False, "blocked": [],
+                                     "path": [[c, ly] for c, ly in plan.path], "value": plan.value, "ties": plan.ties,
+                                     "kinds": [m.rows.get(c, {}).get(ly) for c, ly in plan.path], "marks_short": True})
+                return
+            self.plan = plan = alt
             alt = self._avoid_shop(m, 1, sorted(t.ly for t in rc), plan)
-            if alt is None:                          # 第一档：这个区域绕不开商店，已经安排撤退重开
+            if alt is None:                          # 这个区域绕不开商店，已经安排撤退重开
                 self.surveys.append({"area": self.area, "cols": m.last, "extreme_cols": m.extreme_cols(), "ok": False, "blocked": [],
                                      "path": [[c, ly] for c, ly in plan.path], "value": plan.value, "ties": plan.ties,
                                      "kinds": [m.rows.get(c, {}).get(ly) for c, ly in plan.path], "shop_forced": True})
@@ -708,8 +772,9 @@ class Walk:
             elif self.tier.extreme == "avoid":
                 note = f"　（{self.tier.name}：能不走极难就不走，这条路上有 {plan.extremes} 个）"
             elif plan.blocked:
+                who = "没勾「第四层没双极难就重开」，" if self.area == 4 and self.tier.extreme == "all" else self.tier.name
                 note = (f"　（极难在{'、'.join(f'第 {c} 列' for c in ex)}，其中{'、'.join(f'第 {c} 列' for c in plan.blocked)}走不到；"
-                        f"{self.tier.name}不为这个重开，打能走到的 {plan.extremes} 个）")
+                        f"{who}不为这个重开，打能走到的 {plan.extremes} 个）")
             else:
                 note = f"　（极难在{'、'.join(f'第 {c} 列' for c in ex)}，都能走到）"
             r.log.say(f"      路线：{self._plan_text(plan)}" + note)
@@ -1513,15 +1578,17 @@ class Walk:
 
     def _scroll_list(self, s: Seen, tb: dict[str, Any], down: bool, boss: bool, dist: float | None = None) -> None:
         """把名单往下翻（down=True）或者往上翻回去，dist = 翻多少（1280×720 的像素；不给就是看名单时的一步）。
-        拖完按住一下再抬手，名单就不会被甩出去继续滑。起手、落手都不高过 y=232：再往上是「用角色名搜索」的输入框可能露出来的地方。"""
+        拖完按住一下再抬手，名单就不会被甩出去继续滑。起手、落手都不高过 LIST_TOP（平时 y=232：再往上是「用角色名搜索」的输入框可能露出来的地方；
+        首领战 y=335：名单低一截，一次只拖一行）。要翻的比这一下拖得动的多时，拖完再看、接着拖（_seek_card 每次都重新算）。"""
         tb["scrolls"] += 1
         if tb["scrolls"] > 80:
             self.r.log.shot(s.img, "team_scroll_stuck", png=True)
             raise Halt("队伍编组的名单翻了很多次还没弄完，停下")
         x, y = LIST_DRAG
-        step = min(float(dist if dist is not None else LIST_STEP[bool(boss)]), y - 232.0)
+        step = min(float(dist if dist is not None else LIST_STEP[bool(boss)]), y - LIST_TOP[bool(boss)])
         a, b = ((x, y), (x, y - step)) if down else ((x, y - step), (x, y))
-        if self.r.swipe(s, a, b, f"名单往{'下' if down else '上'}翻{'一屏' if dist is None else f' {step / ROW_STEP[bool(boss)]:.0f} 行'}",
+        rows = f"{step / ROW_STEP[bool(boss)]:.1f}".rstrip("0").rstrip(".")
+        if self.r.swipe(s, a, b, f"名单往{'下' if down else '上'}翻{'一屏' if dist is None else f' {rows} 行'}",
                         duration=0.55, hold_end=0.25) != "changed":
             tb["scroll"] += 1 if down else -1
         self.r.pause(self.beat + 0.3 * self.patience)
@@ -1561,6 +1628,10 @@ class Walk:
             rows = (row - hi) if down else max(1, lo - row)
             if not down and lo == 0:                 # 第一行已经看得见了还没找到：不再往上拉（会拉出搜索框），当成这张卡认不出来了
                 return False
+            at = (tab, down, lo, hi)
+            if tb.get("seek_at") == at:              # 上一下拖完，看得见的还是那几行：那一下没拖动。换成只拖一行（起手点在名单正中间），不照原样再来
+                rows = 1
+            tb["seek_at"] = at
             self._scroll_list(s, tb, down, boss, dist=max(1, rows) * ROW_STEP[bool(boss)])
         else:                                        # 一张认识的卡都没看见（不该发生）：往下翻一行试试，再不行放弃
             if tb["seek"] > 3:
@@ -1912,8 +1983,10 @@ class Walk:
                         r.log.event("team_card_lost", role=u.role, attr=u.attr, name=u.name, act=act)
                         tb["queue"].pop(0)
                         tb["seek"] = 0
+                        tb.pop("seek_at", None)
                     return
                 tb["seek"] = 0
+                tb.pop("seek_at", None)
                 box = (card.cx - 36.0, card.cy - 30.0, 72.0, 60.0)
                 # 上场要“想一想”的只有这一队的第一个人（挑谁是一次想好的，后面几个是接着点）；想的时间从看到名单那一刻算起，
                 # 排队伍、推演花掉的已经算在里面（Runner._react）
@@ -2607,8 +2680,12 @@ class Walk:
                 return
             self.defeat_report = False
             self.attempt += 1  # 这一场的报告都记完，才切换到重试条件
-            if self.attempt <= self._retries() and self.battle_kind == "boss" and (self.area == 5 or self.tier.boss_more):
+            if self.attempt <= self._retries() and self.battle_kind == "boss" and (self.area == 5 or not self.reroll["boss3_single"]):
+                # 首领战输了：下一次多编一队。区域 3 首领以前第一、二档只用一队打（凹分要一队过）——2026-11-27 用户定的：
+                # “三层 boss 一队过不了就重开……不再作为默认选项”，勾了（boss3_single）才只用一队
                 self.boss_extra += 1
+                if self.area != 5:
+                    r.log.say(f"      区域 3 首领一队没打过：下一次编 {self._boss_teams()} 队（要只用一队、打不过就重开：勾「更多选项」里的「第三层首领一队过不了就重开」）。")
         kind = KIND_CN.get(self.battle_kind, self.battle_kind) + (f"·{self.enemy}" if self.enemy else "")
         if self.attempt <= self._retries():
             if self.battle_kind == "boss":

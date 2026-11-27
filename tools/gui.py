@@ -42,6 +42,11 @@ OPTIONS: dict[str, list[tuple[str, str, Any, str]]] = {
     # spend = 使用门票（通行证）：不勾就只打一局、停在最终首领跟前；勾了才打最终首领并结算，成功打完才算一局。每次都要重新勾，不记。
     # settle = 分数线（只在勾了门票时有用）：没到分的局撤退重打，不用门票、不算一局
     # resume = 接着打进行中的一局（2026-11-27）：游戏里有一局打到一半时从地图接手；不勾就照旧停下、不动那一局。每次都要重新勾，不记
+    # shop2 = 第二层（区域 2）绕不开商店就重开。原来只有第一档看得到这个勾；2026-11-27 用户要的：哪一档都能勾（别的档位勾了带 --shop-reroll）
+    # marks1 = 第一层（区域 1）没有双角色格就重开（2026-11-27 用户要的，放在 shop2 上面）：区域 1 踩不到两个印记格就撤退重开（--marks-reroll）
+    # boss3 = 第三层（区域 3）首领一队过不了就重开（2026-11-27 用户定的：以前第一、二档默认就这样，现在不再是默认的；--boss3-single）。
+#       不勾：哪一档都是打输了下一次多编一队
+    # ex4 = 第四层（区域 4）没有双极难就重开（2026-11-27 用户定的：以前第一、二档默认就这样，现在不再是默认的，勾了才重开；--ex4-reroll）
     "15": [("tier", "tier", 2, "档位"), ("guild", "select", "", "公会"),
            ("spend", "check", False, "使用门票（不勾选则停在最终boss前）"),
            ("laps", "number", 1, "打几局"), ("settle", "number", 0, "到多少分才结算（0 = 不看分数）"),
@@ -49,7 +54,10 @@ OPTIONS: dict[str, list[tuple[str, str, Any, str]]] = {
            ("report", "check", False, "每场打完看伤害报告"), ("equip", "check", False, "编完队自动装备特别装备"),
            ("recover", "check", False, "换日 / 掉线后自己走回迷宫"),
            ("boss_want", "text", "", "第一档·只留这些首领（空着不挑）"), ("boss_avoid", "text", "", "第一档·遇到就重开的首领"),
-           ("shop2", "check", False, "第一档·第二层（区域 2）绕不开商店就重开"),
+           ("marks1", "check", False, "第一层（区域 1）没有双角色格就重开"),
+           ("shop2", "check", False, "第二层（区域 2）绕不开商店就重开"),
+           ("boss3", "check", False, "第三层（区域 3）首领一队过不了就重开"),
+           ("ex4", "check", False, "第四层（区域 4）没有双极难就重开"),
            ("start_at", "time", "", "定时：几点开始"), ("stop_at", "time", "", "几点以后不再开新的一局")],
     # 按饰品数量连续刷：text = 一行字。spend（使用门票）每次都要重新勾，不记
     "18": [("targets", "text", "", "目标"), ("max_runs", "number", 10, "最多打通几局"), ("tier", "tier", 2, "档位"), ("guild", "select", "", "公会"),
@@ -132,8 +140,17 @@ def build_cmd(key: str, items: dict[str, tuple], opts: dict[str, Any], python: s
             text = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff（）()＆&·,，、 ]", "", str(opts.get(name) or ""))[:120].strip()
             if text and str(opts.get("tier")) == "1":
                 cmd += [flag, text]
-        if opts.get("shop2") is False and str(opts.get("tier")) == "1":
-            cmd.append("--no-shop-reroll")
+        if str(opts.get("tier")) == "1":            # 第一档本来就带这条规矩：不勾 = 明着关掉
+            if opts.get("shop2") is False:
+                cmd.append("--no-shop-reroll")
+        elif opts.get("shop2") is True:             # 别的档位：勾了才带
+            cmd.append("--shop-reroll")
+        if opts.get("marks1") is True:
+            cmd.append("--marks-reroll")
+        if opts.get("boss3") is True:
+            cmd.append("--boss3-single")
+        if opts.get("ex4") is True:
+            cmd.append("--ex4-reroll")
         for name in ("report", "recover"):      # 这几个开关在设置里默认是关的：勾了、没勾都明着告诉脚本，界面上是什么就是什么
             if isinstance(opts.get(name), bool):
                 cmd.append(("--" if opts[name] else "--no-") + name)
@@ -753,7 +770,7 @@ function optHtml(it, o){
   if (o.kind === 'time') return '<label>' + esc(o.label) + ' <input type="time" id="' + id + '" value="' + esc(o.value) + '" style="padding:2px 5px;border:1px solid #b8c4dc;border-radius:6px"></label>';
   if (o.kind === 'text' && o.name.indexOf('boss_') === 0) return '<label class="t1only" style="flex:1 1 45%;display:none">' + esc(o.label) + ' <input type="text" id="' + id + '" value="' + esc(o.value) + '" placeholder="比如 巨型魔像、奇美拉" style="flex:1;min-width:150px;padding:3px 6px;border:1px solid #b8c4dc;border-radius:6px"></label>';
   if (o.kind === 'text') return '<label style="flex:1 1 100%">' + esc(o.label) + ' <input type="text" id="' + id + '" value="' + esc(o.value) + '"' + ' style="flex:1;min-width:180px;padding:3px 6px;border:1px solid #b8c4dc;border-radius:6px"></label>';
-  if (o.kind === 'check' && o.name === 'shop2') return '<label class="t1only" style="display:none"><input type="checkbox" id="' + id + '"' + (o.value ? ' checked' : '') + '> ' + esc(o.label) + '</label>';
+  // shop2（第二层绕不开商店就重开）原来只在第一档显示；2026-11-27 起哪一档都显示，和别的勾一样画
   return o.kind === 'check' ? '<label' + (o.name === 'spend' ? ' class="spend"' : '') + '><input type="checkbox" id="' + id + '"' + (o.value ? ' checked' : '') + '> ' + esc(o.label) + '</label>'
                             : '<label>' + esc(o.label) + ' <input type="number" id="' + id + '" value="' + esc(o.value) + '" min="0"' + (o.name === 'settle' ? ' class="wide" max="999999" step="100"' : ' max="' + (o.name === 'laps' || o.name === 'max_runs' ? 50 : 40) + '"') + '></label>';
 }
@@ -895,6 +912,11 @@ function drawHero(){
        '· 看伤害报告：勾了的话每场打完点开看每个人打了多少（首领战也看；时间到了没打完输的那一场也看），记下来调输出角色的比重、下一次换人。<br>' +
        '· 自动装备：勾了的话编完队点「特别装备」→「自动装备」。你自己配好了装备、不想被换，就别勾。<br>' +
        '· 挂机过夜：游戏每天 5 点换日、偶尔掉线，勾上“自己走回迷宫”它会从标题画面走回来接着打（不勾就停下）；运行期间电脑不会自己睡眠。自动跑的时候你自己伸手点模拟器，它会先停手等你。<br>' +
+       '· 四个“不合意就重开”的勾（哪一档都能勾；重开不用门票，勾了任何一个，重开次数的上限放宽到 20 次）：<br>' +
+       '　「第一层没有双角色格就重开」：区域 1 的第 2、4 列各有一个印记格（给角色的格子），两个都踩不到就撤退重开。<br>' +
+       '　「第二层绕不开商店就重开」：区域 2 不走商店——有不过商店、又不耽误这一档该打的极难的路就走那条；绕不开就撤退重开。<br>' +
+       '　「第三层首领一队过不了就重开」：区域 3 首领只用一队打，重打也不加队，打不过就撤退重开。不勾的话打输了下一次多编一队（以前第一、二档默认只用一队，现在要勾了才这样）。<br>' +
+       '　「第四层没有双极难就重开」：区域 4 的两个极难没法都走到就撤退重开。不勾的话只打走得到的那个、不重开（以前第一、二档默认会重开，现在要勾了才重开）。<br>' +
        '· 第一档的“只留 / 重开的首领”写名字，用顿号隔开（区域 3 首领和最终首领都写进去）。</div></details></div>';
   $('hero').innerHTML = h; $('hero').style.display = '';
   pickTier(Number(t0));

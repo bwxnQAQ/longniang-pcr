@@ -115,6 +115,10 @@ def main() -> int:
     ap.add_argument("--boss-want", default="", help="第一档：只留这些首领（名字用顿号或逗号分开；区域 3 首领和最终首领都写进去）")
     ap.add_argument("--boss-avoid", default="", help="第一档：遇到就重开的首领")
     ap.add_argument("--no-shop-reroll", action="store_true", help="第一档：第二层（区域 2）绕不开商店时不重开（默认会重开）")
+    ap.add_argument("--shop-reroll", action="store_true", help="第二层（区域 2）绕不开商店就撤退重开——哪一档都能带（第一档本来就带；界面「更多选项」里的勾）")
+    ap.add_argument("--marks-reroll", action="store_true", help="第一层（区域 1）踩不到两个印记格（给角色的格子）就撤退重开（界面「更多选项」里的勾）")
+    ap.add_argument("--ex4-reroll", action="store_true", help="第四层（区域 4）的两个极难没法都走到就撤退重开（不带 = 只打走得到的，不为这个重开）")
+    ap.add_argument("--boss3-single", action="store_true", help="第三层（区域 3）首领只用一队打，打不过就撤退（不带 = 打输了下一次多编一队）")
     ap.add_argument("--start-at", default="", help="定时：等到这个钟点（HH:MM，按电脑的时间）再开始；不写 = 现在就开始")
     ap.add_argument("--stop-at", default="", help="定时：过了这个钟点（HH:MM）就不再开新的一局（正在打的那一局会打完）")
     ap.add_argument("--guild", default="", help="打哪个公会：写名字（十个公会都行），或者写 刷分 = 让工具挑平均估分最高的（默认咲恋救济院）；"
@@ -161,10 +165,23 @@ def main() -> int:
     if args.boss_avoid.strip():
         reroll["boss_avoid"] = names_of(args.boss_avoid)
     if args.no_shop_reroll:
-        reroll["no_shop_areas"] = []
+        reroll["no_shop_areas"], reroll["no_shop_always"] = [], False
+    elif args.shop_reroll:                           # 2026-11-27 用户要的：哪一档都能勾“第二层绕不开商店就重开”
+        reroll["no_shop_always"] = True
+        reroll["no_shop_areas"] = reroll["no_shop_areas"] or [2]
+    shop_any = bool(reroll["no_shop_always"] and reroll["no_shop_areas"] and not tier.reroll)
+    if args.marks_reroll:                            # 2026-11-27 用户要的：第一层没双角色格就重开
+        reroll["marks_first"] = 2
+    if args.ex4_reroll:                              # 2026-11-27 用户定的：四层没双 ex 重开放进选项，不再是默认的
+        reroll["double_ex4"] = True
+    if args.boss3_single:                            # 2026-11-27 用户定的：三层 boss 一队过不了就重开也放进选项，不再是默认的
+        reroll["boss3_single"] = True
     max_restarts = max(0, int(wk.get("max_restarts", 3)))
     if tier.max_restarts is not None:                # 第一档要凹首领、凹事件，重开次数放宽
         max_restarts = max(max_restarts, tier.max_restarts)
+    if shop_any or reroll["marks_first"] or reroll["double_ex4"] or reroll["boss3_single"]:
+        # 勾了这几条“不合意就重开”：重开是常有的事（不用门票），上限和第一档一样放宽，不然三次就停了
+        max_restarts = max(max_restarts, TR.TIERS[1].max_restarts or 20)
     log = RunLog("farm" if args.farm else "clear" if args.full else "walk")
     log.brief = not bool(cfg.get("detail_output", False))      # 窗口里只写干了什么；点击坐标这类细节只进 log.txt（设置里 "detail_output": true 可以改回来）
     loot = None
@@ -233,6 +250,20 @@ def main() -> int:
                 + (f"；区域 {'、'.join(str(a) for a in reroll['no_shop_areas'])} 不走商店——有不过商店、极难又一列不落的路就走那条，绕不开就重开"
                    if reroll["no_shop_areas"] else "；路过商店不重开")
                 + f"；最多重开 {max_restarts} 次（改这些：config/settings.json 的 walk.reroll）。")
+    if reroll["marks_first"]:
+        log.say(f"  勾了「第一层没双角色格就重开」：区域 1 要踩到 {reroll['marks_first']} 个印记格（给角色的格子），踩不到就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
+    if shop_any:
+        log.say(f"  勾了「第二层绕不开商店就重开」：区域 {'、'.join(str(x) for x in reroll['no_shop_areas'])} 不走商店——有不过商店、又不耽误这一档该打的极难的路就走那条，"
+                f"绕不开就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
+    if reroll["boss3_single"]:
+        log.say(f"  勾了「第三层首领一队过不了就重开」：区域 3 首领只用一队打，重打也不加队，打不过就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
+    else:
+        log.say("  区域 3 首领打输了下一次多编一队（要只用一队、打不过就重开：勾「更多选项」里的「第三层首领一队过不了就重开」）。")
+    if tier.extreme != "avoid":
+        if reroll["double_ex4"]:
+            log.say(f"  勾了「第四层没双极难就重开」：区域 4 的两个极难没法都走到就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
+        elif tier.extreme == "all":
+            log.say("  区域 4 的两个极难没法都走到时不重开，打走得到的（要重开：勾「更多选项」里的「第四层没双极难就重开」）。")
     # 定时（阶段 5）：等到几点再开始；过了几点不再开新的一局
     start_at, stop_at = str(args.start_at or wk.get("start_at") or "").strip(), str(args.stop_at or wk.get("stop_at") or "").strip()
     if start_at:

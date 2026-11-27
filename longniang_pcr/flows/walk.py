@@ -158,6 +158,8 @@ ROLE_NAMES = {"tank": "坦克", "heal": "治疗", "attack": "攻击", "break": "
 ROLE_RULE = [({"tank", "heal"}, "heal"), ({"attack", "break"}, "break"), ({"support", "buff"}, "buff"), ({"debuff", "jam"}, "debuff")]
 LABEL_NAMES = {"normal": "普通", "extreme": "极难", "boss": "首领", None: "非战斗格"}
 KIND_CN = {"normal": "普通战", "extreme": "极难", "boss": "首领战"}
+# 「更多选项」里绕商店那个勾在日志里的叫法（界面上的全名见 tools/gui.py 的 shop2）。2026-11-28 用户定的：必须绕过商店且经过极难才不重开
+SHOP_OPT = "第二层不能既绕开商店又经过极难就重开"
 PROFILE_CN = {"fast": "打法：快攻", "steady": "打法：稳（带坦克和治疗）", "sturdy": "打法：加厚", "burst": "打法：全输出"}
 HIT_CN = {"aoe": "打一群", "single": "打单体", "both": "单体和一群都行"}
 # 队伍编组的名单一屏放不下时往下翻：每次拖多远（1280×720 坐标）。首领战一屏只有一行（行距 147），普通战两行；
@@ -598,11 +600,20 @@ class Walk:
     def _extreme_mode(self) -> str:
         """这个区域排路线时对极难的要求（plan.make_plan 的 extreme）。平时就是档位定的。
         区域 4（有两个极难的那一层）：2026-11-27 用户定的“四层没双 ex 重开……不再作为默认选项”——
-        勾了（reroll 里的 double_ex4）= 两个都要走到，走不到就撤退重开；没勾 = 能走到几个打几个，不为这个重开。第四档不走极难，不管。"""
+        勾了（reroll 里的 double_ex4）= 两个都要走到，走不到就撤退重开；没勾 = 能走到几个打几个，不为这个重开。第四档不走极难，不管。
+        带着“不走商店”那一条的区域（默认只有区域 2，见 _shop_rule）：第三档也按一列不落来——要有一条不过商店、又经过极难的路才往下走。"""
         mode = self.tier.extreme
         if self.area == 4 and mode != "avoid":
             return "all" if self.reroll["double_ex4"] else "most"
+        if mode == "most" and self._shop_rule():
+            # 2026-11-28 用户定的：绕商店那个勾要“绕过商店且经过极难才不重开”。第一、二档本来就是极难一列不落；
+            # 第三档平时走不到极难不重开，带着这条时在这个区域也按一列不落来（走不到 → _give_up 撤退重开）。第四档不走极难，只看商店。
+            return "all"
         return mode
+
+    def _shop_rule(self) -> bool:
+        """这个区域带不带“不走商店”这一条（默认只有区域 2）：第一档自带；别的档位勾了「更多选项」里那个勾（reroll 里的 no_shop_always）也带。"""
+        return bool((self.tier.reroll or self.reroll["no_shop_always"]) and self.area in self.reroll["no_shop_areas"])
 
     def _need_marks(self, m: AreaMap, col: int, starts: list[int], plan: Plan) -> Plan | None:
         """勾了「第一层没双角色格就重开」（reroll 里的 marks_first = 2）：区域 1 的第 2、4 列各有一个印记格（给角色的格子），
@@ -679,11 +690,13 @@ class Walk:
 
     def _avoid_shop(self, m: AreaMap, col: int, starts: list[int], plan: Plan) -> Plan | None:
         """这个区域不走商店（默认只有区域 2——用户定的“第二层如果必须走商店就重开”）。第一档本来就带；
-        别的档位勾了「第二层绕不开商店就重开」（reroll 里的 no_shop_always，2026-11-27）也带。
-        选好的路不过商店：原样用。过商店：有不过商店、这一档该打的极难又不耽误的路就改走那条；没有（必须走商店）→ 安排撤退重开，返回 None。"""
-        if not ((self.tier.reroll or self.reroll["no_shop_always"]) and self.area in self.reroll["no_shop_areas"]) or not plan.ok:
+        别的档位勾了「更多选项」里那个勾（reroll 里的 no_shop_always，2026-11-27）也带。
+        2026-11-28 用户定的：这个勾是“必须绕过商店且经过极难才不重开”——要有**同一条路**既不过商店、又经过这个区域的极难。
+        极难这一半在 _extreme_mode 里（第一、二、三档在这个区域都按一列不落排路线，走不到 → _give_up）；第四档不走极难，只看商店。
+        选好的路不过商店：原样用。过商店：有不过商店、极难又不落的路就改走那条；没有 → 安排撤退重开，返回 None。"""
+        if not self._shop_rule() or not plan.ok:
             return plan
-        who = self.tier.name if self.tier.reroll else "勾了「第二层绕不开商店就重开」"
+        who = self.tier.name if self.tier.reroll else f"勾了「{SHOP_OPT}」"
         if not any(m.rows.get(c, {}).get(ly) == "shop" for c, ly in plan.path):
             return plan
         r = self.r
@@ -694,10 +707,12 @@ class Walk:
                 r.log.say(f"      原本的路要过商店；{who}，在区域 {self.area} 不走商店，改走：{self._plan_text(alt)}。")
                 r.log.event("shop_avoid", area=self.area, col=self.col, path=[[c, ly] for c, ly in alt.path], was=[[c, ly] for c, ly in plan.path])
             return alt
-        why = (f"区域 {self.area} 绕不开商店" + ("（不过商店就打不全极难）" if alt.path else "")
-               + f"（{who}：第二层必须走商店就重开）")
+        if alt.path:                                 # 不过商店的路是有的，但它经过不了极难；经过极难的路又都要过商店
+            why = f"区域 {self.area} 没有既不过商店、又经过极难的路（不过商店就走不到极难）（{who}）"
+        else:
+            why = f"区域 {self.area} 绕不开商店（{who}）"
         r.log.say(f"      {why}：撤退重开。")
-        r.log.event("shop_restart", area=self.area, col=self.col, path=[[c, ly] for c, ly in plan.path])
+        r.log.event("shop_restart", area=self.area, col=self.col, path=[[c, ly] for c, ly in plan.path], no_extreme=bool(alt.path))
         self.want_retreat, self.why_retreat, self.restart = True, why, True
         return None
 
@@ -706,6 +721,8 @@ class Walk:
         why = f"区域 {self.area} {cols}的极难走不到" if plan.path else f"区域 {self.area} 从这里走不到尽头（地图可能没看准）"
         if plan.path and self.area == 4 and self.reroll["double_ex4"]:
             why += "（勾了「第四层没双极难就重开」）"
+        elif plan.path and self.area != 4 and self.tier.extreme == "most" and self._shop_rule():
+            why += f"（勾了「{SHOP_OPT}」）"          # 第三档平时不为极难重开，这一次是那个勾要的
         self.r.log.say(f"      {why}：撤退。")
         self.r.log.event("blocked", area=self.area, col=self.col, blocked=plan.blocked, extremes=plan.extremes, wanted=plan.wanted)
         self.want_retreat, self.why_retreat, self.restart = True, why, bool(plan.path)

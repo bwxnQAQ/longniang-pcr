@@ -31,7 +31,7 @@ from longniang_pcr import damage as DM
 from longniang_pcr import chars as CH
 from longniang_pcr import config, console, ocr, paths, wiki
 from longniang_pcr.device.device import Device, DeviceError
-from longniang_pcr.flows.walk import MOVE_NAMES, Relap, Walk, load_event_defaults, shops_summary
+from longniang_pcr.flows.walk import MOVE_NAMES, SHOP_OPT, Relap, Walk, load_event_defaults, shops_summary
 from longniang_pcr.human import Human, HumanParams
 from longniang_pcr import runlog as RL
 from longniang_pcr.runlog import RunLog
@@ -115,7 +115,8 @@ def main() -> int:
     ap.add_argument("--boss-want", default="", help="第一档：只留这些首领（名字用顿号或逗号分开；区域 3 首领和最终首领都写进去）")
     ap.add_argument("--boss-avoid", default="", help="第一档：遇到就重开的首领")
     ap.add_argument("--no-shop-reroll", action="store_true", help="第一档：第二层（区域 2）绕不开商店时不重开（默认会重开）")
-    ap.add_argument("--shop-reroll", action="store_true", help="第二层（区域 2）绕不开商店就撤退重开——哪一档都能带（第一档本来就带；界面「更多选项」里的勾）")
+    ap.add_argument("--shop-reroll", action="store_true",
+                    help="第二层（区域 2）要有一条不过商店、又经过极难的路才往下走，没有就撤退重开——哪一档都能带（第一档本来就带；第四档不走极难、只看商店；界面「更多选项」里的勾）")
     ap.add_argument("--marks-reroll", action="store_true", help="第一层（区域 1）踩不到两个印记格（给角色的格子）就撤退重开（界面「更多选项」里的勾）")
     ap.add_argument("--ex4-reroll", action="store_true", help="第四层（区域 4）的两个极难没法都走到就撤退重开（不带 = 只打走得到的，不为这个重开）")
     ap.add_argument("--boss3-single", action="store_true", help="第三层（区域 3）首领只用一队打，打不过就撤退（不带 = 打输了下一次多编一队）")
@@ -166,7 +167,7 @@ def main() -> int:
         reroll["boss_avoid"] = names_of(args.boss_avoid)
     if args.no_shop_reroll:
         reroll["no_shop_areas"], reroll["no_shop_always"] = [], False
-    elif args.shop_reroll:                           # 2026-11-27 用户要的：哪一档都能勾“第二层绕不开商店就重开”
+    elif args.shop_reroll:                           # 2026-11-27 用户要的：哪一档都能勾；2026-11-28：这个勾 = 必须绕过商店且经过极难才不重开
         reroll["no_shop_always"] = True
         reroll["no_shop_areas"] = reroll["no_shop_areas"] or [2]
     shop_any = bool(reroll["no_shop_always"] and reroll["no_shop_areas"] and not tier.reroll)
@@ -253,8 +254,13 @@ def main() -> int:
     if reroll["marks_first"]:
         log.say(f"  勾了「第一层没双角色格就重开」：区域 1 要踩到 {reroll['marks_first']} 个印记格（给角色的格子），踩不到就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
     if shop_any:
-        log.say(f"  勾了「第二层绕不开商店就重开」：区域 {'、'.join(str(x) for x in reroll['no_shop_areas'])} 不走商店——有不过商店、又不耽误这一档该打的极难的路就走那条，"
-                f"绕不开就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
+        zones = "、".join(str(x) for x in reroll["no_shop_areas"])
+        if tier.extreme == "avoid":
+            log.say(f"  勾了「{SHOP_OPT}」：区域 {zones} 不走商店，绕不开就撤退重开（不用门票）；{tier.name}不走极难，所以极难那一半不看。"
+                    f"最多重开 {max_restarts} 次。")
+        else:
+            log.say(f"  勾了「{SHOP_OPT}」：区域 {zones} 要有一条不过商店、又经过极难的路才往下走；"
+                    f"没有这样的路（绕不开商店，或者不过商店就走不到极难）就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
     if reroll["boss3_single"]:
         log.say(f"  勾了「第三层首领一队过不了就重开」：区域 3 首领只用一队打，重打也不加队，打不过就撤退重开（不用门票）；最多重开 {max_restarts} 次。")
     else:

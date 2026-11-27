@@ -42,7 +42,8 @@ OPTIONS: dict[str, list[tuple[str, str, Any, str]]] = {
     # spend = 使用门票（通行证）：不勾就只打一局、停在最终首领跟前；勾了才打最终首领并结算，成功打完才算一局。每次都要重新勾，不记。
     # settle = 分数线（只在勾了门票时有用）：没到分的局撤退重打，不用门票、不算一局
     # resume = 接着打进行中的一局（2026-11-27）：游戏里有一局打到一半时从地图接手；不勾就照旧停下、不动那一局。每次都要重新勾，不记
-    # shop2 = 第二层（区域 2）绕不开商店就重开。原来只有第一档看得到这个勾；2026-11-27 用户要的：哪一档都能勾（别的档位勾了带 --shop-reroll）
+    # shop2 = 第二层（区域 2）不能既绕开商店又经过极难就重开。原来只有第一档看得到这个勾、只管商店；2026-11-27 用户要的：哪一档都能勾（别的档位勾了带 --shop-reroll）；
+    #   2026-11-28 用户定的：这个勾要“必须绕过商店且经过极难才不重开”（同一条路两样都要；第四档不走极难，只看商店）
     # marks1 = 第一层（区域 1）没有双角色格就重开（2026-11-27 用户要的，放在 shop2 上面）：区域 1 踩不到两个印记格就撤退重开（--marks-reroll）
     # boss3 = 第三层（区域 3）首领一队过不了就重开（2026-11-27 用户定的：以前第一、二档默认就这样，现在不再是默认的；--boss3-single）。
 #       不勾：哪一档都是打输了下一次多编一队
@@ -55,7 +56,7 @@ OPTIONS: dict[str, list[tuple[str, str, Any, str]]] = {
            ("recover", "check", False, "换日 / 掉线后自己走回迷宫"),
            ("boss_want", "text", "", "第一档·只留这些首领（空着不挑）"), ("boss_avoid", "text", "", "第一档·遇到就重开的首领"),
            ("marks1", "check", False, "第一层（区域 1）没有双角色格就重开"),
-           ("shop2", "check", False, "第二层（区域 2）绕不开商店就重开"),
+           ("shop2", "check", False, "第二层（区域 2）不能既绕开商店又经过极难就重开"),
            ("boss3", "check", False, "第三层（区域 3）首领一队过不了就重开"),
            ("ex4", "check", False, "第四层（区域 4）没有双极难就重开"),
            ("start_at", "time", "", "定时：几点开始"), ("stop_at", "time", "", "几点以后不再开新的一局")],
@@ -768,7 +769,7 @@ function optHtml(it, o){
   if (o.kind === 'time') return '<label>' + esc(o.label) + ' <input type="time" id="' + id + '" value="' + esc(o.value) + '" style="padding:2px 5px;border:1px solid #b8c4dc;border-radius:6px"></label>';
   if (o.kind === 'text' && o.name.indexOf('boss_') === 0) return '<label class="t1only" style="flex:1 1 45%;display:none">' + esc(o.label) + ' <input type="text" id="' + id + '" value="' + esc(o.value) + '" placeholder="比如 巨型魔像、奇美拉" style="flex:1;min-width:150px;padding:3px 6px;border:1px solid #b8c4dc;border-radius:6px"></label>';
   if (o.kind === 'text') return '<label style="flex:1 1 100%">' + esc(o.label) + ' <input type="text" id="' + id + '" value="' + esc(o.value) + '"' + ' style="flex:1;min-width:180px;padding:3px 6px;border:1px solid #b8c4dc;border-radius:6px"></label>';
-  // shop2（第二层绕不开商店就重开）原来只在第一档显示；2026-11-27 起哪一档都显示，和别的勾一样画
+  // shop2（第二层不能既绕开商店又经过极难就重开）原来只在第一档显示；2026-11-27 起哪一档都显示，和别的勾一样画
   return o.kind === 'check' ? '<label' + (o.name === 'spend' ? ' class="spend"' : '') + '><input type="checkbox" id="' + id + '"' + (o.value ? ' checked' : '') + '> ' + esc(o.label) + '</label>'
                             : '<label>' + esc(o.label) + ' <input type="number" id="' + id + '" value="' + esc(o.value) + '" min="0"' + (o.name === 'settle' ? ' class="wide" max="999999" step="100"' : ' max="' + (o.name === 'laps' || o.name === 'max_runs' ? 50 : 40) + '"') + '></label>';
 }
@@ -912,7 +913,7 @@ function drawHero(){
        '· 挂机过夜：游戏每天 5 点换日、偶尔掉线，勾上“自己走回迷宫”它会从标题画面走回来接着打（不勾就停下）；运行期间电脑不会自己睡眠。自动跑的时候你自己伸手点模拟器，它会先停手等你。<br>' +
        '· 四个“不合意就重开”的勾（哪一档都能勾；重开不用门票，勾了任何一个，重开次数的上限放宽到 20 次）：<br>' +
        '　「第一层没有双角色格就重开」：区域 1 的第 2、4 列各有一个印记格（给角色的格子），两个都踩不到就撤退重开。<br>' +
-       '　「第二层绕不开商店就重开」：区域 2 不走商店——有不过商店、又不耽误这一档该打的极难的路就走那条；绕不开就撤退重开。<br>' +
+       '　「第二层不能既绕开商店又经过极难就重开」：区域 2 要有一条不过商店、又经过极难的路才往下走，走的就是那条；没有这样的路（绕不开商店，或者不过商店就走不到极难）就撤退重开。第三档勾了也这样；第四档不走极难，只看绕不绕得开商店。<br>' +
        '　「第三层首领一队过不了就重开」：区域 3 首领只用一队打，重打也不加队，打不过就撤退重开。不勾的话打输了下一次多编一队（以前第一、二档默认只用一队，现在要勾了才这样）。<br>' +
        '　「第四层没有双极难就重开」：区域 4 的两个极难没法都走到就撤退重开。不勾的话只打走得到的那个、不重开（以前第一、二档默认会重开，现在要勾了才重开）。<br>' +
        '· 第一档的“只留 / 重开的首领”写名字，用顿号隔开（区域 3 首领和最终首领都写进去）。</div></details></div>';

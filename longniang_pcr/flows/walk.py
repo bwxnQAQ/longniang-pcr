@@ -2643,23 +2643,15 @@ class Walk:
         r = self.r
         btns = r.book.find_all(s.img, "btn_choose")
         role_reward = what == "角色加入奖励"
-        if role_reward and (len(btns) != 3 or any(abs(x + w / 2 - (271 + 370 * i)) > 90
-                                                   for i, (_, (x, y, w, h)) in enumerate(btns))):
+        if len(btns) != 3 or any(abs(x + w / 2 - (271 + 370 * i)) > 90
+                                 for i, (_, (x, y, w, h)) in enumerate(btns)):
             self.choice_wait += 1
             if self.choice_wait <= 6:
                 r.pause(0.5 * self.patience)
             else:
                 self.choice_wait = 0
-                r.hand_over(s, "三个角色的选择按钮没读齐，请选择这次奖励角色")
+                r.hand_over(s, f"「{what}」的三个选择按钮没读齐，请选择这次奖励")
                 r.wait_leave(s.page, 15.0)
-            return
-        if not btns:
-            self.choice_wait += 1                    # 页面刚出来时按钮还在飞进来：等一等再看
-            if self.choice_wait <= 6:
-                r.pause(0.6 * self.patience)
-                return
-            r.hand_over(s, f"「{what}」页面上没找到「选择」按钮，这一步请你来选")
-            r.wait_leave(s.page, 15.0)
             return
         if self.team_mode != "role":
             self.choice_wait = 0
@@ -2747,19 +2739,18 @@ class Walk:
                 r.log.event("mark_pick", attrs=marks, pick=pick, values=values or None)
             else:
                 opts = CD.relic_options(r.book, s.img)
-                if all(o[0] is None for o in opts) and self.choice_wait < 4:
+                if any(series is None or stars < 1 for series, stars in opts):
                     self.choice_wait += 1
-                    r.pause(0.5 * self.patience)
-                    return
-                if all(o[0] is None for o in opts):
+                    if self.choice_wait <= 4:
+                        r.pause(0.5 * self.patience)
+                        return
                     self.choice_wait = 0
-                    r.hand_over(s, "三个奖励都没认出来，请选择这次奖励")
+                    r.hand_over(s, "三个遗物的系列或星数没有读齐，请选择这次奖励")
                     r.wait_leave(s.page, 15.0)
                     return
                 pick, why = ST.choose_relic(opts, self.series)
                 label = (f"选择第 {pick + 1} 个（{CD.SERIES_CN[opts[pick][0]]} ★{opts[pick][1]}，{why}；"
                          f"三个是 {'、'.join(f'{CD.SERIES_CN[o[0]]}★{o[1]}' for o in opts)}）")
-                r.log.event("relic_pick", options=[[o[0], o[1]] for o in opts], pick=pick, levels=dict(self.series))
                 after = ("series", opts[pick])
         self.choice_wait = 0
         if role_reward:
@@ -2768,9 +2759,11 @@ class Walk:
                 return
             r.log.event("recruit", **recruit_event)
         else:
-            pick = min(pick, len(btns) - 1)
-            if self._tap_wait(s, choose_button(btns[pick][1]), label, think=True) == "changed":
+            status = r.tap(s, choose_button(btns[pick][1]), label, think=True)
+            if status != "tapped" or not r.wait_leave(s.page, 6.0):
                 return
+            if after is not None and after[0] == "series":
+                r.log.event("relic_pick", options=[[o[0], o[1]] for o in opts], pick=pick, levels=dict(self.series))
         if after is not None:
             if after[0] == "role":
                 self.recruit_win = False

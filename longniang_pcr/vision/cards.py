@@ -357,12 +357,24 @@ def mark_attrs(book: PageBook, img: np.ndarray) -> list[str | None]:
     return out
 
 
-def _stars(norm: np.ndarray, i: int) -> int:
+def _stars(norm: np.ndarray, i: int, dy: int = 0) -> int:
     x, y, w, h = RELIC_STARS
-    p = norm[y:y + h, x + RELIC_BADGE[2] * i:x + RELIC_BADGE[2] * i + w].astype(np.int16)
-    yellow = ((p[..., 2] > 215) & (p[..., 1] > 170) & (p[..., 0] < 130)).astype(np.uint8)
-    n, _, st, _ = cv2.connectedComponentsWithStats(yellow, connectivity=8)
-    return int(sum(1 for k in range(1, n) if st[k][4] >= 60))     # 一颗星大约 150～200 个黄像素
+    p = norm[y + dy:y + dy + h, x + RELIC_BADGE[2] * i:x + RELIC_BADGE[2] * i + w].astype(np.int16)
+    yellow = (p[..., 2] > 215) & (p[..., 1] > 170) & (p[..., 0] < 130)
+    if dy:
+        # 滑入中的卡片半透明，星星会变暗，但仍保留金黄色差。
+        b, g, r = p.transpose(2, 0, 1)
+        yellow |= (r > 175) & (g > 145) & (r - b > 65) & (g - b > 35)
+    yellow = yellow.astype(np.uint8)
+    _, _, stats, centers = cv2.connectedComponentsWithStats(yellow, connectivity=8)
+    # 只数从左向右连续的星位，排除卡片金边和装备图案。
+    count = 0
+    for cx in range(18, w, 21):
+        if not any(area >= 60 and abs(xc - cx) <= 5 and abs(yc - 16) <= 7
+                   for (*_, area), (xc, yc) in zip(stats[1:], centers[1:])):
+            break
+        count += 1
+    return count
 
 
 def relic_options(book: PageBook, img: np.ndarray) -> list[tuple[str | None, int]]:
@@ -371,8 +383,12 @@ def relic_options(book: PageBook, img: np.ndarray) -> list[tuple[str | None, int
     x0, y0, dx = RELIC_BADGE
     out = []
     for i in range(3):
-        ser, _ = _classify(book, norm, x0 + dx * i, y0, "ico_series_", SERIES, pad=5, size=44)
-        out.append((ser, _stars(norm, i)))
+        best, score, offset = None, 0.0, 0
+        for dy in range(0, 55, 6):
+            ser, confidence = _classify(book, norm, x0 + dx * i, y0 + dy, "ico_series_", SERIES, pad=5, size=44)
+            if ser and confidence > score:
+                best, score, offset = ser, confidence, dy
+        out.append((best, _stars(norm, i, offset)))
     return out
 
 

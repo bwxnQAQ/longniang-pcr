@@ -2,6 +2,28 @@
 from . import chars, strategy as st
 
 
+def side_recruits(book, owned, roster, names, roles, targets):
+    """按实出队伍的顺序补物法输出，每队预留两个可同时上阵的输出位。"""
+    for team_no, side in enumerate(targets):
+        if side not in st.SIDES:
+            continue
+        teams = targets[:team_no + 1].count(side)
+        versions = {}
+        for name, (_, role) in roster.items():
+            if (owned and name not in owned) or role not in st.DAMAGE or book.atk(name) != side:
+                continue
+            base = chars.base_of(name)
+            versions[base] = versions.get(base, 0) + 1
+        if sum(min(count, teams) for count in versions.values()) >= 2 * teams:
+            continue
+        picks = [i for i, (name, role) in enumerate(zip(names, roles))
+                 if name and name not in roster and (not owned or name in owned)
+                 and role in st.DAMAGE and book.atk(name) == side and versions.get(chars.base_of(name), 0) < teams]
+        if picks:
+            return picks
+    return None
+
+
 def unit(book, owned, rates, name, role, attr):
     return st.Unit(name, role, attr, name=name, base=chars.base_of(name),
                    func=book.role_as(name), tags=book.tags(name), atk=book.atk(name),

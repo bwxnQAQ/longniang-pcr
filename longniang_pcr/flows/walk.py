@@ -1143,12 +1143,13 @@ class Walk:
                 return
         self.team_expect, self.team_retry = None, 0
         note = f"{tv.members} 人" if fill and tv.members else "留空"
+        self._faces(s, boss_tab=tv.tab)
         if tv.tab < 3:
             # 换页签以后还是「队伍编组」这个页面，所以点完不等“离开页面”，停一拍再看
             if r.tap(s, BOX["team.start"], f"队伍{tv.tab + 1}（队伍 {tv.tab}：{note}）") != "changed":
                 self.team_changed = self.equip_done = self.auto_done = False      # 下一队重新算
             r.pause(self.beat + 0.3 * self.patience)
-        elif self._faces(s) and r.tap(s, BOX["team.start"], f"战斗开始（首领战，队伍 3：{note}）") != "changed":
+        elif r.tap(s, BOX["team.start"], f"战斗开始（首领战，队伍 3：{note}）") != "changed":
             self.fighting = True
             r.wait_leave(s.page)
 
@@ -1710,7 +1711,7 @@ class Walk:
             if boss == 1:
                 self.boss_lineups.clear()
             if is_boss:
-                self.boss_lineups[boss] = {"team": [u.name for u in plan.team if u.name], "had": list(self.last_had),
+                self.boss_lineups[boss] = {"had": list(self.last_had),
                                            "front_tough": sub0.tough if sub0 else None}
             named = sum(1 for u in units if u.name)
             vs = f"打{self.enemy}，" if self.enemy else ""
@@ -1890,13 +1891,13 @@ class Walk:
             return
         if is_boss and boss < 3:
             note = f"{n_mem} 人" if fill else "留空"
-            self._faces(s, boss_tab=boss)
+            self._faces(s, boss_tab=boss, members=members)
             if r.tap(s, BOX["team.start"], f"队伍{boss + 1}（队伍 {boss}：{note}）") != "changed":
                 self.team_changed = self.equip_done = self.auto_done = False
             r.pause(self.beat + 0.3 * self.patience)
             return
         label = f"战斗开始（首领战，队伍 3：{n_mem} 人）" if is_boss else f"战斗开始（{n_mem} 人）"
-        self._faces(s, boss_tab=3 if is_boss else 0)
+        self._faces(s, boss_tab=3 if is_boss else 0, members=members)
         if r.tap(s, BOX["team.start"], label) != "changed":
             self.fighting = True
             r.wait_leave(s.page)
@@ -2225,8 +2226,9 @@ class Walk:
     def _remember(self, win: bool) -> None:
         """这一场打完：先记进这一趟的战斗清单（小结里列“输了哪几场、哪几场最慢”用）；再把上场的队和结果按敌人记进账本
         （账本只记极难和单队打的首领战，五个人都认得出名字的）。"""
+        played = self.boss_lineups.get(1, {}).get("team", []) if self.battle_kind == "boss" else self.last_team
         if not self._multi_boss():
-            self._record_team_result(self.last_team, win, self.last_secs)
+            self._record_team_result(played, win, self.last_secs)
         self.recruit_win = win and not (self.battle_kind == "boss" and self._boss_teams() > 1)
         self.fights.append({"area": self.area, "kind": self.battle_kind, "enemy": self.enemy, "win": bool(win), "game": self.last_game,
                             "real": self.last_secs, "attempt": self.attempt, "how": None if win else self.lost_how})
@@ -2234,8 +2236,8 @@ class Walk:
             return
         if self.battle_kind == "boss" and self._boss_teams() > 1:
             return
-        team = [n for n in self.last_team if "/" not in n]
-        if len(team) != 5 or len(team) != len(self.last_team):
+        team = [n for n in played if "/" not in n]
+        if len(team) != 5 or len(team) != len(played):
             return
         est = None                                   # 开打前战斗估算说这一队几秒打完（上的是规则排的队就看规则那一队的估算）
         le = self.last_est or {}
@@ -2261,7 +2263,7 @@ class Walk:
         return mods
 
     # ---- 真机伤害 ----
-    def _faces(self, s: Seen, boss_tab: int = 0) -> bool:
+    def _faces(self, s: Seen, boss_tab: int = 0, members=None) -> bool:
         """开打之前：把成员栏里每个位置的头像截下来、认一下是谁（打完去伤害报告里找同一张脸）。总是返回 True。
         首领战要翻三个页签才到「战斗开始」，那时成员栏里是第 3 队（常常是空的）：所以首领战在离开第 1 队的页签时就截（boss_tab=1），
         到点「战斗开始」时（boss_tab=3）已经有第 1 队的头像就不再截。"""
@@ -2277,21 +2279,28 @@ class Walk:
             self.report_attempts.clear()
             self.report_row = self.report_waits = 0
         self.faces, self.face_names, self.faces_tab = [], [], boss_tab
+        if boss_tab:
+            if members is None:
+                members = CD.member_cards(self.r.book, s.img)
+            self.face_names = [self.chars.identify(c.fp, c.role, c.attr)[0] if c else None for c in members]
+            self.boss_lineups.setdefault(boss_tab, {})["team"] = list(dict.fromkeys(n for n in self.face_names if n))
         if not self.report_on or self.team_mode != "role":
             return True
         try:
             self.faces = RP.member_faces(s.img)
-            norm = to_norm(s.img)
-            for i, f in enumerate(self.faces):
-                name = None
-                if f is not None:
-                    name, _score = self.chars.identify(CD.fingerprint(norm, TM.SLOT_X0 + TM.SLOT_DX * i, TM.SLOT_Y))
-                self.face_names.append(name if name in self.last_team else None)
+            if not boss_tab:
+                norm = to_norm(s.img)
+                for i, f in enumerate(self.faces):
+                    name = None
+                    if f is not None:
+                        name, _score = self.chars.identify(CD.fingerprint(norm, TM.SLOT_X0 + TM.SLOT_DX * i, TM.SLOT_Y))
+                    self.face_names.append(name if name in self.last_team else None)
         except Exception as e:  # noqa: BLE001  这一步出什么错都不该挡住开打
             self.faces, self.face_names = [], []
             self.r.log.say(f"      （记成员栏头像时出错：{type(e).__name__}: {e}——这一场不看伤害报告）")
         if boss_tab and any(face is not None for face in self.faces):
-            self.report_teams[boss_tab] = (self.faces, self.face_names, dict(self.last_roles))
+            roles = {n: self.chars.role_as(n) or c.role for n, c in zip(self.face_names, members) if n and c}
+            self.report_teams[boss_tab] = (self.faces, self.face_names, roles)
         return True
 
     def _damage_report(self, s: Seen, where: str = "win") -> bool:
@@ -2427,7 +2436,7 @@ class Walk:
                                               team_no=self.report_row or 1, shot=shot, unit=rep.unit)
             if not self.boss_dmg.save():
                 r.log.say("      BOSS 专项伤害记录未保存；原伤害记录不受影响。")
-            elif res["full"] and team_cause != "protection":
+            elif res["rate"] or res["sim"]:
                 r.log.say("      已单独学习这一队的 BOSS 伤害，供后续首领编队使用。")
         if self.battle_kind == "normal" and self.road_dmg is not None:
             res = self.road_dmg.record([n or "?/?" for n in names], roles, damage, sim_share,
@@ -2441,7 +2450,7 @@ class Walk:
             if self.battle_kind == "boss":
                 entry = entry.get("by_team", {}).get(self.report_row or 1, {})
             team_cause = team_cause or entry.get("how")
-            if team_cause == "timeout" and not self.no_mech and res["full"]:
+            if team_cause == "timeout" and result == "lose" and not self.no_mech and res["full"]:
                 entry["weak"], entry["strong"] = self._weak_dealers(role_map)
         r.log.event("damage_report", ok=bool(res["full"]), shot=shot, team=names, roles=roles, attempt=self.attempt, cause=team_cause,
                     team_no=self.report_row or 1, shares={n: round(v, 4) for n, v in res["shares"].items()},
@@ -2680,13 +2689,10 @@ class Walk:
                 missing_tags.difference_update(self.chars.tags(n))
             eligible = [i for i, role in enumerate(roles) if (need_tank and role == "tank")
                         or (need_heal and (role == "heal" or heals[i] >= 1)) or missing_tags & tags[i]] or None
-            preferred = (guide.get("sides") or [guide.get("side")])[0]
-            if not eligible and preferred in ST.SIDES:
-                dealers = sum(role in ST.DAMAGE and self.chars.atk(n) == preferred
-                              for n, (_, role) in self.run_units.items())
-                if dealers < 2:
-                    eligible = [i for i, role in enumerate(roles) if role in ST.DAMAGE and sides[i] == preferred
-                                and names[i] and names[i] not in self.run_units and not unlisted[i]] or None
+            if guide and not eligible:
+                teams = self.teams_final if boss_name == self.bosses[1] else self.teams_mid
+                targets = (guide.get("sides") or [guide.get("side")])[:teams]
+                eligible = RC.side_recruits(self.chars, owned, self.run_units, names, roles, targets)
             if guide:
                 wants = {"roles": [r for r, missing in (("tank", need_tank), ("heal", need_heal)) if missing],
                          "tags": sorted(missing_tags)}

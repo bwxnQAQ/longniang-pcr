@@ -192,6 +192,52 @@ def find_tiles(book: PageBook, img: np.ndarray) -> list[Tile]:
     return tiles
 
 
+def column_at(book: PageBook, img: np.ndarray, x: int, known: dict[int, str | None] | None = None) -> list[Tile]:
+    """前沿一格都没认出来的一列（find_tiles 不给这样的列）：在 x 这个横坐标上，按平台两侧的颜色 + 图标 / 战斗标签再找一遍。
+
+    2026-11-28 一位玩家在区域 1 看全图时停在“第 4 列和下一列之间的连线没看到”：那一列从上到下是 事件 / 印记 / 事件，
+    上面那格的前沿被印记格的图标挡着（0.31），下面那格被底部界面挡着（−0.10），平时只靠中间印记格的前沿（0.59，门槛 0.5）；
+    截图那一瞬间下面事件格图标上的闪光正好闪在这条前沿上（掉到 0.41），整列就没了——三格的平台颜色和图标其实都认得出来。
+
+    known = 这一列以前看到过的 {行: 格子类型}（看全图时前一屏记下的）。算不算有这一列：
+      - 没有 known（新的一列）：有平台的行只落在“两格列”或只落在“三格 / 一格列”的行上，而且至少一格认得出图标或战斗标签
+        （免得把背景当成格子）；
+      - 有 known：以前看到过格子的行上平台都在，认得出类型的不能和记下的不一样，至少对上一格（或者那一列本来就没有认得出类型的格子）。
+    不算就返回 []。返回的格子和 find_tiles 里“前沿被挡住”的格子一样：score = 0、inferred = True。
+    """
+    norm = to_norm(img)
+    gray = cv2.cvtColor(norm, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(norm, cv2.COLOR_BGR2HSV)
+    out: list[Tile] = []
+    for ly in ROW_LY:
+        plat = platform_kind(hsv, x, ly)
+        if not plat:
+            continue
+        if plat == "lit":
+            t = Tile(x, ly, 0.0, 255.0, "player", False, None, True)
+        else:
+            glow = plat != "dark"
+            label = _label_at(book, gray, x, ly)
+            t = Tile(x, ly, 0.0, 255.0 if glow else 0.0, plat if glow else "", glow, label, True)
+            t.kind = label or _icon_at(book, gray, x, ly)
+        out.append(t)
+    rows = {t.ly for t in out}
+    if not rows or (rows & set(ROWS_2) and rows & set(ROWS_3)):
+        return []
+    if known:
+        if not set(known) <= rows:
+            return []
+        same = 0
+        for t in out:
+            was = known.get(t.ly)
+            if was and t.kind:
+                if was != t.kind:
+                    return []
+                same += 1
+        return out if same or not any(known.values()) else []
+    return out if any(t.kind for t in out) else []
+
+
 def kind_at(book: PageBook, img: np.ndarray, x: int, ly: int) -> str | None:
     """(x, ly) 这个位置上的格子类型：战斗标签（普通 / 极难）或者非战斗格的图标。格子前沿被界面挡住时也能用。"""
     gray = cv2.cvtColor(to_norm(img), cv2.COLOR_BGR2GRAY)

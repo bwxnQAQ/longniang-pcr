@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from ..plan import AreaMap
+from ..plan import KIND_NAMES, AreaMap
 from ..runner import Halt, Runner, Seen
 from ..vision import routes as RT
 from ..vision import tiles as TL
@@ -92,6 +92,7 @@ class Survey:
         r, m = self.r, self.map
         tiles = TL.find_tiles(r.book, img)
         cols = [(x, tl) for x, tl in TL.columns(tiles) if self._col(x) >= 1]
+        cols = self._fill_columns(img, cols)
         mask = RT.line_mask(img)
         info = []
         for x, tl in cols:
@@ -126,6 +127,42 @@ class Survey:
             m.complete, m.last = True, c_r
         r.log.event("survey_view", offset=round(self.offset), cols=[[x, c, list(rows)] for x, c, rows, _ in info], complete=m.complete)
         return x_r, c_r
+
+    def _fill_columns(self, img: np.ndarray, cols: list[tuple[int, list[TL.Tile]]]) -> list[tuple[int, list[TL.Tile]]]:
+        """这一屏里前沿一格都没认出来的列：按它该在的横坐标，用平台颜色 + 图标再找一遍（TL.column_at），找到就补进 cols。
+
+        find_tiles 认一列靠的是格子前沿，至少要认出一格。有的列平时只有一格的前沿认得出来（比如 事件 / 印记 / 事件：上面那格被印记的图标挡着、
+        下面那格被底部界面挡着，只靠中间印记格，0.59，门槛 0.5），旁边格子图标上的闪光一闪就掉到门槛下面，整列就没了。
+        2026-11-27、28 三位玩家的三次“第 [n] 列和下一列之间的连线没看到，地图不完整”都是这样（区域 1 的第 2 或第 4 列）：
+        那一列和下一列的连线只有这一屏看得到，列没了连线就没记。——同样的事要是出在一屏的最右边，还会被当成“这就是最后一列”。
+
+        该在哪：每一列隔 350 像素；这一屏有认出来的列，就从最近的那一列推（比累计的挪动量准），没有就按出发点和挪动量算。
+        以前看过的列（self.map.seen）拿记下的行和类型去对；没看过的列要至少一格认得出图标 / 战斗标签才算数。
+        """
+        have = {self._col(x): x for x, _ in cols}
+
+        def where(c: int) -> int:
+            if have:
+                near = min(have, key=lambda k: abs(k - c))
+                return int(round(have[near] + (c - near) * TL.COL_DX))
+            return int(round(self.x0 + c * TL.COL_DX - self.offset))
+
+        out = list(cols)
+        c = 1
+        while where(c) <= 1210:                      # 再靠右，平台的右半边就出画面了
+            x = where(c)
+            if c not in have and x >= 70:
+                seen = self.map.seen.get(c)
+                known = {ly: self.map.rows.get(c, {}).get(ly) for ly in seen} if seen else None
+                tl = TL.column_at(self.r.book, img, x, known)
+                if tl:
+                    out.append((x, tl))
+                    self.r.log.say(f"      第 {c} 列的格子边框这一屏没认出来，按平台颜色和图标认的："
+                                   f"{'、'.join(KIND_NAMES.get(t.kind, '？') for t in tl)}。", detail=True)
+                    self.r.log.event("survey_fill", col=c, x=x, rows=[[t.ly, t.kind] for t in tl], known=bool(known))
+            c += 1
+        out.sort(key=lambda z: z[0])
+        return out
 
     def _realign(self, img: np.ndarray, moved: float, want: float) -> float:
         """拖动中没跟住时用：拿停稳后这一屏看到的列，和已经记下的地图对，定下地图到底挪了多少。
